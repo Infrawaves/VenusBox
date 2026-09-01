@@ -136,13 +136,26 @@ func (s *Server) Create(ctx context.Context, req *orchestrator.SandboxCreateRequ
 		}
 	}
 
+	// Hugepage pool backstop. The API applies the same threshold at placement
+	// time, but off a node-info snapshot that can be up to one poll interval
+	// stale, and a resume pinned to its origin node can bypass sampling
+	// altogether. Re-check here against this node's own sample: exhausting the
+	// pool SIGBUSes a faulting Firecracker, killing an already-running sandbox,
+	// so the last word belongs to the node that owns the pool.
+	if err := s.checkHugePagesHeadroom(ctx); err != nil {
+		return nil, err
+	}
+
+	// A non-positive limit disables the count cap; density is bounded by the
+	// hugepage pool via the placement algorithm instead.
 	maxRunningSandboxesPerNode := s.featureFlags.IntFlag(ctx, featureflags.MaxSandboxesPerNode)
+	if maxRunningSandboxesPerNode > 0 {
+		runningSandboxes := s.sandboxFactory.Sandboxes.Count()
+		if runningSandboxes >= maxRunningSandboxesPerNode {
+			telemetry.ReportEvent(ctx, "max number of running sandboxes reached")
 
-	runningSandboxes := s.sandboxFactory.Sandboxes.Count()
-	if runningSandboxes >= maxRunningSandboxesPerNode {
-		telemetry.ReportEvent(ctx, "max number of running sandboxes reached")
-
-		return nil, status.Errorf(codes.ResourceExhausted, "max number of running sandboxes on node reached (%d), please retry", maxRunningSandboxesPerNode)
+			return nil, status.Errorf(codes.ResourceExhausted, "max number of running sandboxes on node reached (%d), please retry", maxRunningSandboxesPerNode)
+		}
 	}
 
 	// Check if we've reached the max number of starting instances on this node
