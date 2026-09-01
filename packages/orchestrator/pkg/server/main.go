@@ -16,6 +16,7 @@ import (
 
 	"github.com/e2b-dev/infra/packages/orchestrator/pkg/cfg"
 	"github.com/e2b-dev/infra/packages/orchestrator/pkg/events"
+	hostmetrics "github.com/e2b-dev/infra/packages/orchestrator/pkg/metrics"
 	"github.com/e2b-dev/infra/packages/orchestrator/pkg/proxy"
 	"github.com/e2b-dev/infra/packages/orchestrator/pkg/sandbox"
 	"github.com/e2b-dev/infra/packages/orchestrator/pkg/sandbox/nbd"
@@ -73,6 +74,7 @@ type Server struct {
 	devicePool               *nbd.DevicePool
 	persistence              storage.StorageProvider
 	featureFlags             *featureflags.Client
+	hostMetrics              *hostmetrics.HostMetrics
 	sbxEventsService         *events.EventsService
 	startingSandboxes        *utils.AdjustableSemaphore
 	peerRegistry             peerclient.Registry
@@ -114,6 +116,7 @@ type ServiceConfig struct {
 	SandboxFactory   *sandbox.Factory
 	Persistence      storage.StorageProvider
 	FeatureFlags     *featureflags.Client
+	HostMetrics      *hostmetrics.HostMetrics
 	SbxEventsService *events.EventsService
 	PeerRegistry     peerclient.Registry
 	Uploads          *sandbox.Uploads
@@ -141,6 +144,7 @@ func New(ctx context.Context, cfg ServiceConfig) (*Server, error) {
 		devicePool:        cfg.DevicePool,
 		persistence:       cfg.Persistence,
 		featureFlags:      cfg.FeatureFlags,
+		hostMetrics:       cfg.HostMetrics,
 		sbxEventsService:  cfg.SbxEventsService,
 		startingSandboxes: startingSandboxes,
 		peerRegistry:      cfg.PeerRegistry,

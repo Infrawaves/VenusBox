@@ -18,14 +18,19 @@ type BestOfKConfig struct {
 	Alpha float64
 	// K is the number of candidate nodes sampled per placement ("power of K choices")
 	K int
+	// HugePagesMaxUsagePercentage is the hugepage pool utilization above which a
+	// node is skipped. The remaining headroom is reserved for running sandboxes
+	// to fault in more pages. Non-positive disables the check.
+	HugePagesMaxUsagePercentage int
 }
 
 // DefaultBestOfKConfig returns the default placement configuration
 func DefaultBestOfKConfig() BestOfKConfig {
 	return BestOfKConfig{
-		R:     4,
-		K:     3,
-		Alpha: 0.5,
+		R:                           8,
+		K:                           3,
+		Alpha:                       0.5,
+		HugePagesMaxUsagePercentage: 70,
 	}
 }
 
@@ -85,6 +90,12 @@ func (b *BestOfK) UpdateConfig(config BestOfKConfig) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.config = config
+}
+
+// hasHugePagesHeadroom lets PlaceSandbox vet a preferred node, which bypasses
+// chooseNode.
+func (b *BestOfK) hasHugePagesHeadroom(node *nodemanager.Node) bool {
+	return isNodeHugePagesAvailable(node, b.getConfig().HugePagesMaxUsagePercentage)
 }
 
 // chooseNode selects the best node for placing a VM with the given quota
@@ -189,6 +200,11 @@ func (b *BestOfK) sample(items []*nodemanager.Node, config BestOfKConfig, exclud
 
 		// Skip if the node's orchestrator predates a requested feature
 		if !NodeSatisfiesFeatures(n, features) {
+			continue
+		}
+
+		// Skip if the node's hugepage pool leaves no headroom for a new sandbox
+		if !isNodeHugePagesAvailable(n, config.HugePagesMaxUsagePercentage) {
 			continue
 		}
 

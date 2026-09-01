@@ -22,6 +22,10 @@ type mockAlgorithm struct {
 	mock.Mock
 }
 
+func (m *mockAlgorithm) hasHugePagesHeadroom(*nodemanager.Node) bool {
+	return true
+}
+
 func (m *mockAlgorithm) chooseNode(ctx context.Context, nodes []*nodemanager.Node, nodesExcluded map[string]struct{}, requested nodemanager.SandboxResources, cpu CPURequirement, features FeatureRequirement, filterByLabels bool, requiredLabels []string) (*nodemanager.Node, error) {
 	args := m.Called(ctx, nodes, nodesExcluded, requested, cpu, features, filterByLabels, requiredLabels)
 	if args.Get(0) == nil {

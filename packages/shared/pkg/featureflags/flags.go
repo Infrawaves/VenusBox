@@ -406,6 +406,15 @@ func envdTimeoutFallbackMs() int {
 	return int(d.Milliseconds())
 }
 
+func hugePagesMaxUsagePercentageFallback() int {
+	v, err := env.GetEnvAsInt("HUGEPAGES_MAX_USAGE_PERCENTAGE", 70)
+	if err != nil {
+		return 70
+	}
+
+	return v
+}
+
 type IntFlag struct {
 	name     string
 	fallback int
@@ -432,7 +441,10 @@ func NewIntFlag(name string, fallback int) IntFlag {
 }
 
 var (
-	MaxSandboxesPerNode = NewIntFlag("max-sandboxes-per-node", 200)
+	// MaxSandboxesPerNode caps concurrently running sandboxes on a node. 0 (the
+	// default) disables the cap, leaving density bounded by the hugepage pool via
+	// HugePagesMaxUsagePercentage.
+	MaxSandboxesPerNode = NewIntFlag("max-sandboxes-per-node", 0)
 	// The LD keys keep the legacy "gcloud-" prefix, but the limits apply to uploads on all storage providers.
 	StorageConcurrentUploadLimit  = NewIntFlag("gcloud-concurrent-upload-limit", 8)
 	StorageMaxUploadTasks         = NewIntFlag("gcloud-max-tasks", 16)
@@ -440,7 +452,7 @@ var (
 	ClickhouseBatcherMaxDelay     = NewIntFlag("clickhouse-batcher-max-delay", 1000) // 1s in milliseconds
 	ClickhouseBatcherQueueSize    = NewIntFlag("clickhouse-batcher-queue-size", 1000)
 	BestOfKSampleSize             = NewIntFlag("best-of-k-sample-size", 3)                           // Default K=3
-	BestOfKMaxOvercommit          = NewIntFlag("best-of-k-max-overcommit", 400)                      // Default R=4 (stored as percentage, max over-commit ratio)
+	BestOfKMaxOvercommit          = NewIntFlag("best-of-k-max-overcommit", 800)                      // Default R=8 (stored as percentage, max over-commit ratio)
 	BestOfKAlpha                  = NewIntFlag("best-of-k-alpha", 50)                                // Default Alpha=0.5 (stored as percentage for int flag, current usage weight)
 	EnvdInitTimeoutMilliseconds   = NewIntFlag("envd-init-request-timeout-milliseconds", 50)         // Timeout for envd init request in milliseconds
 	EnvdTimeoutMilliseconds       = NewIntFlag("envd-timeout-milliseconds", envdTimeoutFallbackMs()) // Timeout for waiting for envd on resume; falls back to ENVD_TIMEOUT env var (default 10s)
@@ -470,6 +482,14 @@ var (
 	// OrchestratorRoutingPublishFlag has been on for one max sandbox length.
 	OrchestratorRoutingPrioritizedFlag = NewBoolFlag("orchestrator-routing-prioritized", false)
 	MaxCacheWriterConcurrencyFlag      = NewIntFlag("max-cache-writer-concurrency", 10)
+
+	// HugePagesMaxUsagePercentage is the hugepage pool utilization above which a
+	// node stops accepting new sandboxes. Guest RAM is faulted in on demand, so a
+	// node's capacity is bounded by its pool rather than by the RAM its sandboxes
+	// nominally declare. The headroom is reserved for running sandboxes to fault
+	// in further pages: exhausting the pool SIGBUSes the faulting VM. Non-positive
+	// disables the check. Falls back to the HUGEPAGES_MAX_USAGE_PERCENTAGE env var.
+	HugePagesMaxUsagePercentage = NewIntFlag("hugepages-max-usage-percentage", hugePagesMaxUsagePercentageFallback())
 
 	// BuildCacheMaxUsagePercentage the maximum percentage of the cache disk storage
 	// that can be used before the cache starts evicting items.
@@ -587,7 +607,7 @@ var (
 
 	// MaxStartingInstancesPerNode limits concurrent sandbox start/resume operations on a single orchestrator node.
 	// Must be > 0.
-	MaxStartingInstancesPerNode = NewIntFlag("max-starting-instances-per-node", 3)
+	MaxStartingInstancesPerNode = NewIntFlag("max-starting-instances-per-node", 16)
 
 	// MaxConcurrentEvictions caps the number of sandbox evictions that can run
 	// in parallel per API instance. Excess items remain expired in the store

@@ -117,7 +117,11 @@ The control-plane entry point (Gin, OpenAPI-generated from `spec/openapi.yml`, p
 - **Placement**: keeps a live map of orchestrator nodes (discovered via Nomad, Kubernetes, or a
   static list). Chooses a node per sandbox with a **best-of-K** algorithm
   (`internal/orchestrator/placement/`): sample K ready nodes, score by CPU
-  commitment/usage, pick the lowest; retry on exhausted nodes. Tunable live via feature flags.
+  commitment/usage, pick the lowest; retry on exhausted nodes. Nodes whose hugepage pool
+  (used + reserved) is at or above `hugepages-max-usage-percentage` (default 70%) are skipped,
+  so density is bounded by the pool rather than a fixed per-node sandbox count
+  (`max-sandboxes-per-node` defaults to 0 = no cap); the orchestrator re-checks its own pool
+  on `Create` and answers `ResourceExhausted`. Tunable live via feature flags.
 - **State**: writes sandbox records to Redis (source of truth for *running* sandboxes) and the
   sandbox→node **routing catalog** (`sandbox:catalog:{id}`) in Redis that client-proxy reads. This
   API-written record is the default routing source; the orchestrator-written
@@ -468,7 +472,8 @@ sequenceDiagram
     seal. A seal failure is permanent (it never re-runs), so the upload fails fast rather than
     retrying.
 - **Resume**: same path as creation, but placement prefers the **origin node** — if the snapshot
-  is still in its local cache, resume avoids any object-storage reads. `Checkpoint` is a
+  is still in its local cache, resume avoids any object-storage reads. The origin node is
+  dropped in favour of normal placement when it has no hugepage headroom. `Checkpoint` is a
   pause+resume in place used to persist state while keeping the sandbox running.
 - **Explicit filesystem-only resume**: `memory: false` on resume/connect demands a cold boot
   (`RebootSandbox`) even when the snapshot includes memory, as a self-serve rescue when the

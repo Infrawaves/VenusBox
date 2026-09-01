@@ -35,6 +35,9 @@ type PlacementResult struct {
 // and current load distribution.
 type Algorithm interface {
 	chooseNode(ctx context.Context, nodes []*nodemanager.Node, nodesExcluded map[string]struct{}, requested nodemanager.SandboxResources, cpu CPURequirement, features FeatureRequirement, filterByLabels bool, requiredLabels []string) (*nodemanager.Node, error)
+	// hasHugePagesHeadroom is needed separately from chooseNode because a
+	// preferred node skips sampling and its filters.
+	hasHugePagesHeadroom(node *nodemanager.Node) bool
 }
 
 // PlaceSandbox derives sbxRequest's orchestrator-capability requirement and
@@ -75,7 +78,15 @@ func placeSandbox(
 	// affinity would otherwise outrank the CPU and feature requirements on
 	// every resume.
 	if preferredNode != nil && NodeSatisfiesCPU(preferredNode, cpu) && NodeSatisfiesFeatures(preferredNode, features) {
-		node = preferredNode
+		// The hugepage filter in sampling is skipped too. Resume is exactly the
+		// case that faults a snapshot's memory back in, so locality here must
+		// yield to pool headroom.
+		if algorithm.hasHugePagesHeadroom(preferredNode) {
+			node = preferredNode
+		} else {
+			telemetry.ReportEvent(ctx, "preferred node has no hugepage headroom, falling back to placement",
+				telemetry.WithNodeID(preferredNode.ID))
+		}
 	}
 
 	// Reported before the loop so a too-old fleet does not reach the caller as a
