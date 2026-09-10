@@ -227,7 +227,7 @@ variable "auth_db_min_idle_connections" {
 variable "hugepages_max_usage_percentage" {
   type        = number
   description = "Hugepage pool utilization above which a node stops accepting new sandboxes. 0 disables the check."
-  default     = 80
+  default     = 70
 }
 
 variable "enable_otel_router_logs" {

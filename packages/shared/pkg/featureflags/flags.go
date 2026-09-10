@@ -254,7 +254,7 @@ func envdTimeoutFallbackMs() int {
 }
 
 func hugePagesMaxUsagePercentageFallback() int {
-	v, err := env.GetEnvAsInt("HUGEPAGES_MAX_USAGE_PERCENTAGE", 80)
+	v, err := env.GetEnvAsInt("HUGEPAGES_MAX_USAGE_PERCENTAGE", 70)
 	if err != nil {
 		return 80
 	}
@@ -388,7 +388,7 @@ var (
 
 	// MaxStartingInstancesPerNode limits concurrent sandbox start/resume operations on a single orchestrator node.
 	// Must be > 0.
-	MaxStartingInstancesPerNode = NewIntFlag("max-starting-instances-per-node", 3)
+	MaxStartingInstancesPerNode = NewIntFlag("max-starting-instances-per-node", 16)
 
 	// MaxConcurrentEvictions caps the number of sandbox evictions that can run
 	// in parallel per API instance. Excess items remain expired in the store

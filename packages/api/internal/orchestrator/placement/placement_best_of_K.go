@@ -32,7 +32,7 @@ func DefaultBestOfKConfig() BestOfKConfig {
 		R:                           8,
 		K:                           3,
 		Alpha:                       0.5,
-		HugePagesMaxUsagePercentage: 80,
+		HugePagesMaxUsagePercentage: 70,
 	}
 }
 
