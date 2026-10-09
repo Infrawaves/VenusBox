@@ -302,7 +302,7 @@ var (
 	BestOfKSampleSize             = NewIntFlag("best-of-k-sample-size", 3)                      // Default K=3
 	BestOfKMaxOvercommit          = NewIntFlag("best-of-k-max-overcommit", 800)                 // Default R=8 (stored as percentage, max over-commit ratio)
 	BestOfKAlpha                  = NewIntFlag("best-of-k-alpha", 50)                           // Default Alpha=0.5 (stored as percentage for int flag, current usage weight)
-	EnvdInitTimeoutMilliseconds   = NewIntFlag("envd-init-request-timeout-milliseconds", 50000) // Timeout for envd init request in milliseconds
+	EnvdInitTimeoutMilliseconds   = NewIntFlag("envd-init-request-timeout-milliseconds", 50) // Timeout for envd init request in milliseconds
 	EnvdTimeoutMilliseconds       = NewIntFlag("envd-timeout-milliseconds", envdTimeoutFallbackMs())
 	HostStatsSamplingInterval     = NewIntFlag("host-stats-sampling-interval", 5000) // Host stats sampling interval in milliseconds (default 5s)
 	MaxCacheWriterConcurrencyFlag = NewIntFlag("max-cache-writer-concurrency", 10)
