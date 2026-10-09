@@ -51,6 +51,7 @@ tf_vars := AWS_PROFILE=$(AWS_PROFILE) AWS_REGION=$(AWS_REGION) \
 	$(call tfvar, DB_MIN_IDLE_CONNECTIONS) \
 	$(call tfvar, AUTH_DB_MAX_OPEN_CONNECTIONS) \
 	$(call tfvar, AUTH_DB_MIN_IDLE_CONNECTIONS) \
+	$(call tfvar, HUGEPAGES_MAX_USAGE_PERCENTAGE) \
 	$(call tfvar, ALLOW_SANDBOX_INTERNAL_CIDRS)
 
 .PHONY: provider-login

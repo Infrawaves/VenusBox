@@ -38,6 +38,9 @@ type PlacementResult struct {
 // and current load distribution.
 type Algorithm interface {
 	chooseNode(ctx context.Context, nodes []*nodemanager.Node, nodesExcluded map[string]struct{}, requested nodemanager.SandboxResources, buildMachineInfo machineinfo.MachineInfo, filterByLabels bool, requiredLabels []string) (*nodemanager.Node, error)
+	// hasHugePagesHeadroom is needed separately from chooseNode because a
+	// preferred node skips sampling and its filters.
+	hasHugePagesHeadroom(node *nodemanager.Node) bool
 }
 
 func PlaceSandbox(
@@ -58,7 +61,15 @@ func PlaceSandbox(
 
 	var node *nodemanager.Node
 	if preferredNode != nil {
-		node = preferredNode
+		// A preferred node skips chooseNode and therefore the hugepage filter in
+		// sampling. Resume is exactly the case that faults a snapshot's memory
+		// back in, so locality here must yield to pool headroom.
+		if algorithm.hasHugePagesHeadroom(preferredNode) {
+			node = preferredNode
+		} else {
+			telemetry.ReportEvent(ctx, "preferred node has no hugepage headroom, falling back to placement",
+				telemetry.WithNodeID(preferredNode.ID))
+		}
 	}
 
 	// First node that attempted the create (not a fast ResourceExhausted refusal).
@@ -149,7 +160,7 @@ func PlaceSandbox(
 		switch statusCode {
 		case codes.ResourceExhausted:
 			failedNode.PlacementMetrics.Skip(sbxRequest.GetSandbox().GetSandboxId())
-			logger.L().Warn(ctx, "Node exhausted, trying another node", logger.WithSandboxID(sbxRequest.GetSandbox().GetSandboxId()), logger.WithNodeID(failedNode.ID))
+			logger.L().Warn(ctx, "Node exhausted, trying another node", logger.WithSandboxID(sbxRequest.GetSandbox().GetSandboxId()), logger.WithNodeID(failedNode.ID), zap.Error(utils.UnwrapGRPCError(err)))
 		default:
 			nodesExcluded[failedNode.ID] = struct{}{}
 			failedNode.PlacementMetrics.Fail(sbxRequest.GetSandbox().GetSandboxId())

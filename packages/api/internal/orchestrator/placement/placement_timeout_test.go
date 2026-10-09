@@ -20,6 +20,10 @@ type stubAlgorithm struct {
 	choose func(nodesExcluded map[string]struct{}) (*nodemanager.Node, error)
 }
 
+func (s stubAlgorithm) hasHugePagesHeadroom(*nodemanager.Node) bool {
+	return true
+}
+
 func (s stubAlgorithm) chooseNode(
 	_ context.Context,
 	_ []*nodemanager.Node,

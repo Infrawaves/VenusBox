@@ -320,8 +320,9 @@ func getBestOfKConfig(ctx context.Context, featureFlagsClient *featureflags.Clie
 	maxOvercommit := float64(maxOvercommitPercent) / 100.0
 
 	return placement.BestOfKConfig{
-		R:     maxOvercommit,
-		K:     k,
-		Alpha: alpha,
+		R:                           maxOvercommit,
+		K:                           k,
+		Alpha:                       alpha,
+		HugePagesMaxUsagePercentage: featureFlagsClient.IntFlag(ctx, featureflags.HugePagesMaxUsagePercentage),
 	}
 }

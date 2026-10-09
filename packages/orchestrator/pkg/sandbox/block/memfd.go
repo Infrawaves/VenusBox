@@ -35,7 +35,17 @@ func NewFromFd(fd int) (*Memfd, error) {
 
 		return nil, fmt.Errorf("fstat memfd: %w", err)
 	}
-	b, err := unix.Mmap(fd, 0, int(st.Size), unix.PROT_READ, unix.MAP_SHARED)
+	// MAP_NORESERVE is required: without it a hugetlbfs memfd reserves its full
+	// length from the hugepage pool up front, which on a densely packed node can
+	// fail the mmap or starve running sandboxes of pages they still need.
+	//
+	// Reading through this mapping consumes no additional pages, because every
+	// page copyFromMemfd touches is one the guest already faulted into the
+	// hugetlbfs page cache. That rests on dirty being a subset of the guest's
+	// written pages; an unfaulted page would fault against an exhausted pool and
+	// raise SIGBUS, taking down the whole orchestrator process rather than just
+	// this sandbox.
+	b, err := unix.Mmap(fd, 0, int(st.Size), unix.PROT_READ, unix.MAP_SHARED|unix.MAP_NORESERVE)
 	if err != nil {
 		_ = unix.Close(fd)
 
