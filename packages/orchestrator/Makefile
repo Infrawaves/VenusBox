@@ -44,6 +44,14 @@ build-local:
 	CGO_ENABLED=1 GOOS=linux GOARCH=$(BUILD_ARCH) go build -o bin/orchestrator -ldflags "-X=main.commitSHA=$(COMMIT_SHA)" .
 	CGO_ENABLED=1 GOOS=linux GOARCH=$(BUILD_ARCH) go build -o bin/clean-nfs-cache -ldflags "-X=main.commitSHA=$(COMMIT_SHA)" ./cmd/clean-nfs-cache
 
+# Builds the export-build CLI: exports a template/sandbox rootfs from object
+# storage as a docker-loadable OCI tar, or pushes it to a registry.
+# Requires the NBD kernel module: modprobe nbd max_part=8
+.PHONY: build-export-build
+build-export-build:
+	$(eval COMMIT_SHA ?= $(shell git rev-parse --short HEAD))
+	CGO_ENABLED=1 GOOS=linux GOARCH=$(BUILD_ARCH) go build -o bin/export-build -ldflags "-X=main.commitSHA=$(COMMIT_SHA)" ./cmd/export-build
+
 .PHONY: build-debug
 build-debug:
 	CGO_ENABLED=1 GOOS=linux GOARCH=$(BUILD_ARCH) go build -race -gcflags=all="-N -l" -o bin/orchestrator .
