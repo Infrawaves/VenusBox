@@ -3,10 +3,10 @@ ENV := $(shell cat ../../.last_used_env || echo "not-set")
 PREFIX := $(strip $(subst ",,$(PREFIX)))
 
 # Volcengine configuration
-VOLC_REGISTRY ?= mp-bp-cn-shanghai.cr.volces.com
+VOLC_REGISTRY ?= bp-dockerhub-relay-cn-hongkong.cr.volces.com
 VOLC_NAMESPACE ?= e2b
 VOLC_IMAGE_PREFIX := $(VOLC_REGISTRY)/$(VOLC_NAMESPACE)
-IMAGE_TAG ?= 2026.29
+IMAGE_TAG ?= 2026.29.hk
 
 # E2B-hosted registry that holds released, prebuilt reverse-proxy images.
 # Published to by the release-please workflow on tagging a release.

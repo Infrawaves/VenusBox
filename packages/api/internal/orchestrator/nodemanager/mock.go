@@ -134,6 +134,25 @@ func WithAllocatedMemoryBytes(bytes uint64) TestOptions {
 	}
 }
 
+// WithHugePages sets the hugepage pool metrics (in page counts) for the test node
+func WithHugePages(total, used, reserved uint64) TestOptions {
+	return func(node *TestNode) {
+		node.metrics.HugePagesTotal = total
+		node.metrics.HugePagesUsed = used
+		node.metrics.HugePagesReserved = reserved
+		node.metrics.HugePageSizeBytes = 2 * 1024 * 1024
+	}
+}
+
+// WithoutHugePagesSample models a node that has registered but not yet reported
+// host metrics. Distinct from WithHugePages(0, 0, 0), a real sample of a node
+// with no pool.
+func WithoutHugePagesSample() TestOptions {
+	return func(node *TestNode) {
+		node.metrics.HugePageSizeBytes = 0
+	}
+}
+
 // MockSandboxClientCustom allows custom error logic per call
 type MockSandboxClientCustom struct {
 	orchestrator.SandboxServiceClient

@@ -5,9 +5,9 @@ PROVIDER ?= gcp
 -include ${ENV_FILE}
 
 # Volcengine image registry (api, client-proxy, db, docker-reverse-proxy)
-VOLC_REGISTRY ?= mp-bp-cn-shanghai.cr.volces.com
+VOLC_REGISTRY ?= bp-dockerhub-relay-cn-hongkong.cr.volces.com
 VOLC_NAMESPACE ?= e2b
-IMAGE_TAG ?= 2026.29
+IMAGE_TAG ?= 2026.29.hk
 
 AWS_BUCKET_PREFIX ?= $(PREFIX)$(AWS_ACCOUNT_ID)-
 GCP_BUCKET_PREFIX ?= $(GCP_PROJECT_ID)-

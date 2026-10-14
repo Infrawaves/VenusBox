@@ -752,6 +752,7 @@ func run(config cfg.Config, opts Options) (success bool) {
 		Proxy:            sandboxProxy,
 		Persistence:      persistence,
 		FeatureFlags:     featureFlags,
+		HostMetrics:      hostMetrics,
 		SbxEventsService: eventsService,
 		PeerRegistry:     peerRegistry,
 		Uploads:          uploads,
