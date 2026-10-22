@@ -120,6 +120,8 @@ locals {
     AUTH_DB_MAX_OPEN_CONNECTIONS = tostring(var.auth_db_max_open_connections)
     AUTH_DB_MIN_IDLE_CONNECTIONS = tostring(var.auth_db_min_idle_connections)
 
+    HUGEPAGES_MAX_USAGE_PERCENTAGE = tostring(var.hugepages_max_usage_percentage)
+
     LOKI_URL                     = "http://loki.service.consul:${local.loki_port}"
     CLICKHOUSE_CONNECTION_STRING = local.clickhouse_connection_string
 

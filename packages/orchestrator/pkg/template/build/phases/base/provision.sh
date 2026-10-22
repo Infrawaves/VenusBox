@@ -13,7 +13,7 @@ if [ -L /etc/resolv.conf ]; then
 fi
 cat > /etc/resolv.conf <<EOF
 nameserver 8.8.8.8
-nameserver 114.114.114.114
+nameserver 1.1.1.1
 EOF
 # Prevent systemd-resolved from taking over resolv.conf
 if [ -f /etc/systemd/resolved.conf ]; then
@@ -30,7 +30,7 @@ fi
 mkdir -p /etc/systemd/resolved.conf.d/
 cat > /etc/systemd/resolved.conf.d/dns.conf <<EOF
 [Resolve]
-DNS=8.8.8.8 114.114.114.114
+DNS=8.8.8.8 1.1.1.1
 FallbackDNS=
 Domains=
 DNSSEC=no
@@ -66,15 +66,8 @@ if [ "$PKG_MANAGER" = "apk" ]; then
     if [ -n "$MISSING" ]; then
         echo "Missing packages detected, installing:$MISSING"
 
-        # Use Aliyun mirror for Alpine
-        ALPINE_VER=$(cat /etc/alpine-release 2>/dev/null | cut -d. -f1,2)
-        if [ -n "$ALPINE_VER" ]; then
-            echo "Detected Alpine $ALPINE_VER, using Aliyun mirror"
-            cat > /etc/apk/repositories <<EOF
-https://mirrors.aliyun.com/alpine/v${ALPINE_VER}/main
-https://mirrors.aliyun.com/alpine/v${ALPINE_VER}/community
-EOF
-        fi
+        # Keep the image's own repositories (official dl-cdn.alpinelinux.org).
+        echo "Using the image's configured apk repositories"
 
         apk update || {
             echo "E: apk update failed (no outbound internet from build VM). On the HOST: enable ip_forward, NAT/MASQUERADE for 169.254.0.0/30, or configure HTTP_PROXY for the build."
@@ -148,42 +141,8 @@ else
     if [ -n "$MISSING" ]; then
         echo "Missing packages detected, installing:$MISSING"
 
-        # Use Aliyun mirror when archive.ubuntu.com is unreachable (e.g. China, restricted network).
-        if [ -f /etc/os-release ]; then
-            . /etc/os-release
-            DISTRO_ID="$ID"
-            CODENAME="${VERSION_CODENAME:-}"
-            if [ -z "$CODENAME" ] && command -v lsb_release >/dev/null 2>&1; then
-                CODENAME=$(lsb_release -cs 2>/dev/null || true)
-            fi
-            if [ -n "$CODENAME" ]; then
-                case "$DISTRO_ID" in
-                    ubuntu)
-                        echo "Detected Ubuntu, using Aliyun mirror for $CODENAME"
-                        cat > /etc/apt/sources.list <<EOF
-deb http://mirrors.aliyun.com/ubuntu/ $CODENAME main restricted universe multiverse
-deb http://mirrors.aliyun.com/ubuntu/ $CODENAME-updates main restricted universe multiverse
-deb http://mirrors.aliyun.com/ubuntu/ $CODENAME-backports main restricted universe multiverse
-deb http://mirrors.aliyun.com/ubuntu/ $CODENAME-security main restricted universe multiverse
-EOF
-                        ;;
-                    debian)
-                        echo "Detected Debian, using Aliyun mirror for $CODENAME"
-                        cat > /etc/apt/sources.list <<EOF
-deb http://mirrors.aliyun.com/debian/ $CODENAME main contrib non-free non-free-firmware
-deb http://mirrors.aliyun.com/debian/ $CODENAME-updates main contrib non-free non-free-firmware
-deb http://mirrors.aliyun.com/debian/ $CODENAME-backports main contrib non-free non-free-firmware
-deb http://mirrors.aliyun.com/debian-security/ $CODENAME-security main contrib non-free non-free-firmware
-EOF
-                        ;;
-                    *)
-                        echo "Keeping default apt sources for $DISTRO_ID"
-                        ;;
-                esac
-            else
-                echo "Could not determine distribution codename; keeping default apt sources for $DISTRO_ID"
-            fi
-        fi
+        # Keep the image's own sources (official archive.ubuntu.com / deb.debian.org).
+        echo "Using the image's configured apt sources"
 
         apt-get -q update || {
             echo "E: apt-get update failed (no outbound internet from build VM). On the HOST: enable ip_forward, NAT/MASQUERADE for 169.254.0.0/30, or configure HTTP_PROXY for the build."
@@ -196,7 +155,7 @@ EOF
             rm -f /etc/resolv.conf
             cat > /etc/resolv.conf <<EOF
 nameserver 8.8.8.8
-nameserver 114.114.114.114
+nameserver 1.1.1.1
 EOF
         fi
     else

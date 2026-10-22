@@ -7,10 +7,10 @@ HOSTNAME := $(shell hostname 2> /dev/null || hostnamectl hostname 2> /dev/null)
 $(if $(HOSTNAME),,$(error Failed to determine hostname: both 'hostname' and 'hostnamectl' failed))
 
 # Volcengine configuration
-VOLC_REGISTRY ?= mp-bp-cn-shanghai.cr.volces.com
+VOLC_REGISTRY ?= bp-dockerhub-relay-cn-hongkong.cr.volces.com
 VOLC_NAMESPACE ?= e2b
 VOLC_IMAGE_PREFIX := $(VOLC_REGISTRY)/$(VOLC_NAMESPACE)
-IMAGE_TAG ?= 2026.29
+IMAGE_TAG ?= 2026.29.hk
 
 # E2B-hosted registry that holds released, prebuilt client-proxy images.
 # Published to by the release-please workflow on tagging a release.

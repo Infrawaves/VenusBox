@@ -9,10 +9,10 @@ $(if $(HOSTNAME),,$(error Failed to determine hostname: both 'hostname' and 'hos
 expectedMigration := $(shell ./../../scripts/get-latest-migration.sh)
 
 # Volcengine configuration
-VOLC_REGISTRY ?= mp-bp-cn-shanghai.cr.volces.com
+VOLC_REGISTRY ?= bp-dockerhub-relay-cn-hongkong.cr.volces.com
 VOLC_NAMESPACE ?= e2b
 VOLC_IMAGE_PREFIX := $(VOLC_REGISTRY)/$(VOLC_NAMESPACE)
-IMAGE_TAG ?= 2026.29
+IMAGE_TAG ?= 2026.29.hk
 
 .PHONY: generate
 generate:
