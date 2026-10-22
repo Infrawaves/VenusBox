@@ -18,6 +18,9 @@ type Directory interface {
 	GetIdentity(ctx context.Context, subject string) (Identity, error)
 	ListIdentities(ctx context.Context, subjects []string) ([]Identity, error)
 	SearchByEmail(ctx context.Context, email string) ([]Identity, error)
+	// SearchByProfile returns identities whose email or name contains query
+	// (case-insensitive), scanning the directory locally, up to limit matches.
+	SearchByProfile(ctx context.Context, query string, limit int) ([]Identity, error)
 	SetExternalID(ctx context.Context, subject string, externalID uuid.UUID) error
 	DeleteIdentity(ctx context.Context, subject string) error
 }

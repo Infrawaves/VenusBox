@@ -33,6 +33,9 @@ type Config struct {
 	OryProjectAPIToken string `env:"ORY_PROJECT_API_TOKEN,unset"`
 
 	DomainName string `env:"DOMAIN_NAME" envDefault:""`
+
+	// SuperAdminUserIDs are internal user UUIDs seeded as super_admin on startup.
+	SuperAdminUserIDs []string `env:"SUPER_ADMIN_USER_IDS" envSeparator:","`
 }
 
 type FailureCondition string

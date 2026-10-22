@@ -19,6 +19,9 @@ type Service interface {
 	UserOrganizationID(ctx context.Context, userID uuid.UUID) (uuid.UUID, error)
 	TeamCreatorContext(ctx context.Context, userID uuid.UUID) (*sharedteamprovision.CreatorContextV1, error)
 	FindProfilesByEmail(ctx context.Context, email string) ([]Profile, error)
+	// FindUserIDsByQuery scans identity directories for email/name substring
+	// matches and maps them to platform user ids, deduplicated, up to limit.
+	FindUserIDsByQuery(ctx context.Context, query string, limit int) ([]uuid.UUID, error)
 	PrepareDeleteUser(ctx context.Context, userID uuid.UUID) (DeleteUserHandle, error)
 }
 
@@ -221,6 +224,53 @@ func (s *service) FindProfilesByEmail(ctx context.Context, email string) ([]Prof
 	}
 
 	return profiles, nil
+}
+
+func (s *service) FindUserIDsByQuery(ctx context.Context, query string, limit int) ([]uuid.UUID, error) {
+	normalized := strings.TrimSpace(query)
+	if normalized == "" || limit <= 0 {
+		return []uuid.UUID{}, nil
+	}
+
+	userIDs := make([]uuid.UUID, 0, limit)
+	seen := make(map[uuid.UUID]struct{}, limit)
+	for _, issuer := range s.issuers {
+		directory := s.directories[issuer]
+
+		identities, err := directory.SearchByProfile(ctx, normalized, limit)
+		if err != nil {
+			return nil, err
+		}
+		if len(identities) == 0 {
+			continue
+		}
+
+		subjects := make([]string, 0, len(identities))
+		for _, id := range identities {
+			subjects = append(subjects, id.Subject)
+		}
+
+		linked, err := s.linkage.UsersForSubjects(ctx, issuer, subjects)
+		if err != nil {
+			return nil, fmt.Errorf("lookup user ids by subjects: %w", err)
+		}
+
+		for _, row := range linked {
+			if row.UserID == uuid.Nil {
+				continue
+			}
+			if _, ok := seen[row.UserID]; ok {
+				continue
+			}
+			seen[row.UserID] = struct{}{}
+			userIDs = append(userIDs, row.UserID)
+			if len(userIDs) >= limit {
+				return userIDs, nil
+			}
+		}
+	}
+
+	return userIDs, nil
 }
 
 type DeleteUserHandle interface {

@@ -73,6 +73,12 @@ type EnvBuild struct {
 	TeamID             *uuid.UUID
 }
 
+type PlatformAdmin struct {
+	UserID    uuid.UUID
+	Role      string
+	CreatedAt time.Time
+}
+
 type Snapshot struct {
 	CreatedAt           pgtype.Timestamptz
 	EnvID               string

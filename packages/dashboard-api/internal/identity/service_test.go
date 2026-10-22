@@ -3,6 +3,7 @@ package identity
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -65,6 +66,26 @@ func (d *fakeDirectory) SearchByEmail(_ context.Context, email string) ([]Identi
 	d.searchedFor = append(d.searchedFor, email)
 
 	return d.byEmail[email], nil
+}
+
+func (d *fakeDirectory) SearchByProfile(_ context.Context, query string, limit int) ([]Identity, error) {
+	if d.listErr != nil {
+		return nil, d.listErr
+	}
+
+	q := strings.ToLower(strings.TrimSpace(query))
+	matches := make([]Identity, 0)
+	for _, id := range d.identities {
+		if q == "" || strings.Contains(strings.ToLower(id.Email), q) ||
+			strings.Contains(strings.ToLower(id.Name), q) {
+			matches = append(matches, id)
+			if limit > 0 && len(matches) >= limit {
+				break
+			}
+		}
+	}
+
+	return matches, nil
 }
 
 func (d *fakeDirectory) SetExternalID(_ context.Context, subject string, externalID uuid.UUID) error {

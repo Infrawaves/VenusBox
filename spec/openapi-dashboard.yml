@@ -30,6 +30,37 @@ components:
       name: X-Team-ID
 
   parameters:
+    builds_search:
+      name: search
+      in: query
+      required: false
+      description: Case-insensitive substring match on build id, template alias, template id, or team name.
+      schema:
+        type: string
+    teams_search:
+      name: search
+      in: query
+      required: false
+      description: Case-insensitive substring match on team name or slug.
+      schema:
+        type: string
+    teams_statuses:
+      name: statuses
+      in: query
+      required: false
+      description: Comma-separated list of team statuses to include (active, blocked, banned).
+      schema:
+        type: array
+        items:
+          type: string
+          enum: [active, blocked, banned]
+    users_search:
+      name: search
+      in: query
+      required: false
+      description: Case-insensitive substring match on user email or name.
+      schema:
+        type: string
     build_id:
       name: build_id
       in: path
@@ -329,6 +360,392 @@ components:
             $ref: "#/components/schemas/Error"
 
   schemas:
+    AddUserToTeamRequest:
+      type: object
+      description: Add the user to the given team.
+      required:
+        - teamID
+      properties:
+        teamID:
+          type: string
+          format: uuid
+
+    GrantPlatformAdminRequest:
+      type: object
+      description: Grant (or update) a platform role to the user with this email.
+      required:
+        - email
+        - role
+      properties:
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+          enum:
+            - platform_admin
+            - super_admin
+
+    PlatformAdminEntry:
+      type: object
+      description: A platform admin with the profile of the user it grants the role to.
+      required:
+        - userID
+        - role
+        - createdAt
+      properties:
+        userID:
+          type: string
+          format: uuid
+        role:
+          type: string
+          enum:
+            - platform_admin
+            - super_admin
+        email:
+          type: string
+          nullable: true
+          description: Email of the user, or `null` when the profile could not be resolved.
+        name:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    PlatformAdminsResponse:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlatformAdminEntry"
+
+    SetTeamBlockedRequest:
+      type: object
+      description: Block or unblock a team. When blocking, an optional reason is stored and returned to the team on rejected requests.
+      required:
+        - isBlocked
+      properties:
+        isBlocked:
+          type: boolean
+        blockedReason:
+          type: string
+          nullable: true
+
+    SuperAdminBuild:
+      description: A build with its owning team's attribution, for the cross-team super-admin view.
+      allOf:
+        - $ref: "#/components/schemas/ListedBuild"
+        - type: object
+          required:
+            - teamID
+            - teamName
+          properties:
+            teamID:
+              type: string
+              format: uuid
+            teamName:
+              type: string
+
+    SuperAdminBuildsResponse:
+      type: object
+      required:
+        - data
+        - nextCursor
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/SuperAdminBuild"
+        nextCursor:
+          type: string
+          nullable: true
+          description: Cursor to pass to the next list request, or `null` if there is no next page.
+
+    SuperAdminMe:
+      type: object
+      description: The signed-in user's platform role, for gating admin surfaces in the dashboard.
+      required:
+        - platformRole
+      properties:
+        platformRole:
+          type: string
+          nullable: true
+          enum:
+            - platform_admin
+            - super_admin
+          description: The caller's platform role, or `null` when the caller has no platform role.
+
+    SuperAdminStats:
+      type: object
+      description: Platform-wide aggregate counts for the super-admin overview.
+      required:
+        - teamCount
+        - userCount
+        - templateCount
+        - buildCount
+      properties:
+        teamCount:
+          type: integer
+          format: int64
+          description: Total number of teams on the platform.
+        userCount:
+          type: integer
+          format: int64
+          description: Total number of users on the platform.
+        templateCount:
+          type: integer
+          format: int64
+          description: Total number of templates across all teams.
+        buildCount:
+          type: integer
+          format: int64
+          description: Total number of builds across all teams.
+
+    SuperAdminTeam:
+      type: object
+      description: A team as seen in the cross-team super-admin view, not scoped to any user's membership.
+      required:
+        - id
+        - name
+        - slug
+        - tier
+        - email
+        - profilePictureUrl
+        - isBlocked
+        - isBanned
+        - blockedReason
+        - limits
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        slug:
+          type: string
+        tier:
+          type: string
+        email:
+          type: string
+        profilePictureUrl:
+          type: string
+          nullable: true
+        isBlocked:
+          type: boolean
+        isBanned:
+          type: boolean
+        blockedReason:
+          type: string
+          nullable: true
+        limits:
+          $ref: "#/components/schemas/UserTeamLimits"
+        createdAt:
+          type: string
+          format: date-time
+
+    SuperAdminTeamDetail:
+      type: object
+      description: A single team with its limits, members, and templates for the super-admin detail view.
+      required:
+        - team
+        - members
+        - templates
+      properties:
+        team:
+          $ref: "#/components/schemas/SuperAdminTeam"
+        members:
+          type: array
+          description: The users that belong to this team.
+          items:
+            $ref: "#/components/schemas/SuperAdminTeamMember"
+        templates:
+          type: array
+          description: The templates owned by this team.
+          items:
+            $ref: "#/components/schemas/SuperAdminTemplate"
+
+    SuperAdminTeamMember:
+      type: object
+      description: A member of a team in the super-admin team detail view.
+      required:
+        - userID
+        - isDefault
+      properties:
+        userID:
+          type: string
+          format: uuid
+        email:
+          type: string
+          nullable: true
+          description: Email of the member, or `null` when the profile could not be resolved.
+        name:
+          type: string
+          nullable: true
+        isDefault:
+          type: boolean
+          description: Whether this is the team's default member.
+        addedBy:
+          type: string
+          format: uuid
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the user joined the team.
+
+    SuperAdminTeamsResponse:
+      type: object
+      required:
+        - data
+        - nextCursor
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/SuperAdminTeam"
+        nextCursor:
+          type: string
+          nullable: true
+          description: Cursor to pass to the next list request, or `null` if there is no next page.
+
+    SuperAdminTemplate:
+      description: A team template with its owning team's attribution, for the cross-team super-admin view.
+      allOf:
+        - $ref: "#/components/schemas/TeamTemplate"
+        - type: object
+          required:
+            - teamID
+            - teamName
+          properties:
+            teamID:
+              type: string
+              format: uuid
+            teamName:
+              type: string
+
+    SuperAdminTemplatesResponse:
+      type: object
+      required:
+        - data
+        - nextCursor
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/SuperAdminTemplate"
+        nextCursor:
+          type: string
+          nullable: true
+          description: Cursor to pass to the next list request, or `null` if there is no next page.
+
+    SuperAdminUser:
+      type: object
+      description: A platform user with the teams they belong to, for the super-admin user list.
+      required:
+        - userID
+        - teams
+        - createdAt
+      properties:
+        userID:
+          type: string
+          format: uuid
+        email:
+          type: string
+          nullable: true
+          description: Email of the user, or `null` when the profile could not be resolved.
+        name:
+          type: string
+          nullable: true
+        teams:
+          type: array
+          description: The teams the user belongs to.
+          items:
+            type: object
+            required:
+              - teamID
+              - name
+            properties:
+              teamID:
+                type: string
+                format: uuid
+              name:
+                type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    SuperAdminUsersResponse:
+      type: object
+      required:
+        - data
+        - nextCursor
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/SuperAdminUser"
+        nextCursor:
+          type: string
+          nullable: true
+          description: Cursor to pass to the next list request, or `null` if there is no next page.
+
+    UpdateTeamLimitsRequest:
+      type: object
+      description: Absolute per-team quota overrides written to project_limits. Every field required.
+      required:
+        - maxLengthHours
+        - concurrentSandboxes
+        - concurrentTemplateBuilds
+        - maxVcpu
+        - maxRamMb
+        - diskMb
+        - eventsTtlDays
+        - defaultFreeDiskSizeMb
+        - maxDiskSizeMb
+      properties:
+        maxLengthHours:
+          type: integer
+          format: int64
+          minimum: 0
+        concurrentSandboxes:
+          type: integer
+          format: int64
+          minimum: 0
+        concurrentTemplateBuilds:
+          type: integer
+          format: int64
+          minimum: 0
+        maxVcpu:
+          type: integer
+          format: int64
+          minimum: 0
+        maxRamMb:
+          type: integer
+          format: int64
+          minimum: 0
+        diskMb:
+          type: integer
+          format: int64
+          minimum: 0
+        eventsTtlDays:
+          type: integer
+          format: int64
+          minimum: 0
+        defaultFreeDiskSizeMb:
+          type: integer
+          format: int64
+          minimum: 0
+        maxDiskSizeMb:
+          type: integer
+          format: int64
+          minimum: 0
+
     Error:
       type: object
       required:
@@ -1504,6 +1921,420 @@ tags:
   - name: templates
 
 paths:
+  /super-admin/teams:
+    get:
+      summary: List all teams across the platform
+      description: Returns a paginated list of every team on the platform with its limits, not scoped to any user's membership. Requires a signed-in user with a platform role. Keyset cursor pagination ordered by creation time (newest first).
+      tags: [super-admin]
+      security:
+        - AuthProviderBearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/teams_search"
+        - $ref: "#/components/parameters/teams_statuses"
+        - $ref: "#/components/parameters/builds_limit"
+        - $ref: "#/components/parameters/builds_cursor"
+      responses:
+        "200":
+          description: Successfully returned paginated teams.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuperAdminTeamsResponse"
+        "400":
+          $ref: "#/components/responses/400"
+        "401":
+          $ref: "#/components/responses/401"
+        "403":
+          $ref: "#/components/responses/403"
+        "500":
+          $ref: "#/components/responses/500"
+
+  /super-admin/teams/{teamID}:
+    get:
+      summary: Get a team's detail
+      description: Returns a single team with its limits, members, and templates. Requires a signed-in user with a platform role.
+      tags: [super-admin]
+      security:
+        - AuthProviderBearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/teamID"
+      responses:
+        "200":
+          description: Successfully returned the team.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuperAdminTeamDetail"
+        "401":
+          $ref: "#/components/responses/401"
+        "403":
+          $ref: "#/components/responses/403"
+        "404":
+          $ref: "#/components/responses/404"
+        "500":
+          $ref: "#/components/responses/500"
+
+  /super-admin/teams/{teamID}/limits:
+    put:
+      summary: Update a team's resource limits
+      description: Overrides a team's effective quota (concurrent sandboxes, template builds, disk, etc.) by writing project_limits directly. Requires a signed-in user with a platform role.
+      tags: [super-admin]
+      security:
+        - AuthProviderBearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/teamID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateTeamLimitsRequest"
+      responses:
+        "204":
+          description: Successfully updated team limits.
+        "400":
+          $ref: "#/components/responses/400"
+        "401":
+          $ref: "#/components/responses/401"
+        "403":
+          $ref: "#/components/responses/403"
+        "500":
+          $ref: "#/components/responses/500"
+
+  /super-admin/teams/{teamID}/block:
+    put:
+      summary: Block or unblock a team
+      description: Sets a team's blocked state. A blocked team has all its API requests rejected with 403 by the blocked-team middleware. Requires a signed-in super admin.
+      tags: [super-admin]
+      security:
+        - AuthProviderBearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/teamID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetTeamBlockedRequest"
+      responses:
+        "204":
+          description: Successfully updated the team's blocked state.
+        "400":
+          $ref: "#/components/responses/400"
+        "401":
+          $ref: "#/components/responses/401"
+        "403":
+          $ref: "#/components/responses/403"
+        "500":
+          $ref: "#/components/responses/500"
+
+  /super-admin/users:
+    get:
+      summary: List all users across the platform
+      description: Returns a paginated list of every platform user with the teams they belong to. Requires a signed-in user with a platform role. Keyset cursor pagination ordered by creation time (newest first). When search is set, matching is done against the identity provider (email/name) and a single unpaginated page of results is returned.
+      tags: [super-admin]
+      security:
+        - AuthProviderBearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/users_search"
+        - $ref: "#/components/parameters/builds_limit"
+        - $ref: "#/components/parameters/builds_cursor"
+      responses:
+        "200":
+          description: Successfully returned paginated users.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuperAdminUsersResponse"
+        "400":
+          $ref: "#/components/responses/400"
+        "401":
+          $ref: "#/components/responses/401"
+        "403":
+          $ref: "#/components/responses/403"
+        "500":
+          $ref: "#/components/responses/500"
+
+  /super-admin/users/{userID}:
+    get:
+      summary: Get a user's detail
+      description: Returns a single platform user with the teams they belong to. Requires a signed-in user with a platform role.
+      tags: [super-admin]
+      security:
+        - AuthProviderBearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/userID"
+      responses:
+        "200":
+          description: Successfully returned the user.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuperAdminUser"
+        "401":
+          $ref: "#/components/responses/401"
+        "403":
+          $ref: "#/components/responses/403"
+        "404":
+          $ref: "#/components/responses/404"
+        "500":
+          $ref: "#/components/responses/500"
+    delete:
+      summary: Delete a user
+      description: Permanently deletes the user's platform records and identity-provider identity. Requires a signed-in super admin.
+      tags: [super-admin]
+      security:
+        - AuthProviderBearerAuth: []
+      parameters:
+        - name: userID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: User deleted.
+        "401":
+          $ref: "#/components/responses/401"
+        "403":
+          $ref: "#/components/responses/403"
+        "404":
+          $ref: "#/components/responses/404"
+        "409":
+          $ref: "#/components/responses/409"
+        "500":
+          $ref: "#/components/responses/500"
+
+  /super-admin/users/{userID}/teams:
+    post:
+      summary: Add a user to a team
+      description: Adds the user as a member of the given team. Requires a signed-in super admin.
+      tags: [super-admin]
+      security:
+        - AuthProviderBearerAuth: []
+      parameters:
+        - name: userID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddUserToTeamRequest"
+      responses:
+        "201":
+          description: User added to the team.
+        "400":
+          $ref: "#/components/responses/400"
+        "401":
+          $ref: "#/components/responses/401"
+        "403":
+          $ref: "#/components/responses/403"
+        "404":
+          $ref: "#/components/responses/404"
+        "500":
+          $ref: "#/components/responses/500"
+
+  /super-admin/users/{userID}/teams/{teamID}:
+    delete:
+      summary: Remove a user from a team
+      description: Removes the user's membership in the given team. A team's default member and its last remaining member cannot be removed. Requires a signed-in super admin.
+      tags: [super-admin]
+      security:
+        - AuthProviderBearerAuth: []
+      parameters:
+        - name: userID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/teamID"
+      responses:
+        "204":
+          description: User removed from the team.
+        "400":
+          $ref: "#/components/responses/400"
+        "401":
+          $ref: "#/components/responses/401"
+        "403":
+          $ref: "#/components/responses/403"
+        "404":
+          $ref: "#/components/responses/404"
+        "500":
+          $ref: "#/components/responses/500"
+
+  /super-admin/builds:
+    get:
+      summary: List all builds across teams
+      description: Returns a paginated list of builds across all teams, each with its owning team's id and name. Requires a signed-in user with a platform role. Keyset cursor pagination ordered by creation time (newest first).
+      tags: [super-admin]
+      security:
+        - AuthProviderBearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/builds_search"
+        - $ref: "#/components/parameters/builds_limit"
+        - $ref: "#/components/parameters/builds_cursor"
+        - $ref: "#/components/parameters/build_statuses"
+      responses:
+        "200":
+          description: Successfully returned paginated builds.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuperAdminBuildsResponse"
+        "400":
+          $ref: "#/components/responses/400"
+        "401":
+          $ref: "#/components/responses/401"
+        "403":
+          $ref: "#/components/responses/403"
+        "500":
+          $ref: "#/components/responses/500"
+
+  /super-admin/me:
+    get:
+      summary: Get the signed-in user's platform role
+      description: Returns the caller's platform role, or `null` when they have none. Any signed-in user may call this; it lets the dashboard decide whether to show admin surfaces without exposing a 403.
+      tags: [super-admin]
+      security:
+        - AuthProviderBearerAuth: []
+      responses:
+        "200":
+          description: Successfully returned the caller's platform role.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuperAdminMe"
+        "401":
+          $ref: "#/components/responses/401"
+        "500":
+          $ref: "#/components/responses/500"
+
+  /super-admin/stats:
+    get:
+      summary: Get platform-wide totals
+      description: Returns aggregate counts (teams, users, templates, builds) across the whole platform for the super-admin overview. Requires a signed-in user with a platform role.
+      tags: [super-admin]
+      security:
+        - AuthProviderBearerAuth: []
+      responses:
+        "200":
+          description: Successfully returned platform totals.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuperAdminStats"
+        "401":
+          $ref: "#/components/responses/401"
+        "403":
+          $ref: "#/components/responses/403"
+        "500":
+          $ref: "#/components/responses/500"
+
+  /super-admin/admins:
+    get:
+      summary: List platform admins
+      description: Returns every platform admin with the granted role and the user's profile. Super-admin only.
+      tags: [super-admin]
+      security:
+        - AuthProviderBearerAuth: []
+      responses:
+        "200":
+          description: Successfully returned platform admins.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformAdminsResponse"
+        "401":
+          $ref: "#/components/responses/401"
+        "403":
+          $ref: "#/components/responses/403"
+        "500":
+          $ref: "#/components/responses/500"
+    post:
+      summary: Grant a platform role by email
+      description: Grants (or updates) a platform role to the user with the given email. Super-admin only.
+      tags: [super-admin]
+      security:
+        - AuthProviderBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GrantPlatformAdminRequest"
+      responses:
+        "204":
+          description: Role granted.
+        "400":
+          $ref: "#/components/responses/400"
+        "401":
+          $ref: "#/components/responses/401"
+        "403":
+          $ref: "#/components/responses/403"
+        "404":
+          $ref: "#/components/responses/404"
+        "500":
+          $ref: "#/components/responses/500"
+
+  /super-admin/admins/{userID}:
+    delete:
+      summary: Revoke a user's platform role
+      description: Removes the user's platform admin row. Super-admin only.
+      tags: [super-admin]
+      security:
+        - AuthProviderBearerAuth: []
+      parameters:
+        - name: userID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Role revoked.
+        "401":
+          $ref: "#/components/responses/401"
+        "403":
+          $ref: "#/components/responses/403"
+        "500":
+          $ref: "#/components/responses/500"
+
+  /super-admin/templates:
+    get:
+      summary: List all templates across teams
+      description: Returns a paginated list of every team-owned template across all teams, each with its owning team's id and name. Requires a signed-in user with a platform role. Keyset cursor pagination ordered by creation time (newest first).
+      tags: [super-admin]
+      security:
+        - AuthProviderBearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/templates_search"
+        - $ref: "#/components/parameters/templates_public"
+        - $ref: "#/components/parameters/templates_limit"
+        - $ref: "#/components/parameters/templates_cursor"
+      responses:
+        "200":
+          description: Successfully returned paginated templates.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuperAdminTemplatesResponse"
+        "400":
+          $ref: "#/components/responses/400"
+        "401":
+          $ref: "#/components/responses/401"
+        "403":
+          $ref: "#/components/responses/403"
+        "500":
+          $ref: "#/components/responses/500"
+
   /health:
     get:
       summary: Health check

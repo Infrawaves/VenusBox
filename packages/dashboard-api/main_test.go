@@ -10,11 +10,13 @@ import (
 
 	"github.com/getkin/kin-openapi/openapi3filter"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/launchdarkly/go-server-sdk/v7/testhelpers/ldtestdata"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	sharedauth "github.com/e2b-dev/infra/packages/auth/pkg/auth"
+	authtypes "github.com/e2b-dev/infra/packages/auth/pkg/types"
 	"github.com/e2b-dev/infra/packages/dashboard-api/internal/api"
 	"github.com/e2b-dev/infra/packages/shared/pkg/featureflags"
 	"github.com/e2b-dev/infra/packages/shared/pkg/logger"
@@ -61,6 +63,7 @@ func TestLegacyTeamMutationGateRunsAfterAuthentication(t *testing.T) {
 		authenticationFunc,
 		featureFlags,
 		store,
+		func(context.Context, uuid.UUID) (authtypes.PlatformRole, bool, error) { return "", false, nil },
 	)
 
 	serve := func(authorization string) *httptest.ResponseRecorder {

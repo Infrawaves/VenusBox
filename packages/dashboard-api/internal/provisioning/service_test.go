@@ -108,6 +108,10 @@ func (testIdentityProvider) FindProfilesByEmail(_ context.Context, email string)
 	}}, nil
 }
 
+func (testIdentityProvider) FindUserIDsByQuery(context.Context, string, int) ([]uuid.UUID, error) {
+	return []uuid.UUID{}, nil
+}
+
 func (testIdentityProvider) TeamCreatorContext(context.Context, uuid.UUID) (*teamprovision.CreatorContextV1, error) {
 	return nil, nil
 }

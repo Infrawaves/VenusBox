@@ -23,3 +23,10 @@ func SetTeamInfoForTest(t *testing.T, c *gin.Context, team *types.Team) {
 
 	authcontext.SetTeamInfo(c, team)
 }
+
+// SetPlatformRoleForTest sets the platform role on the gin context for use in tests.
+func SetPlatformRoleForTest(t *testing.T, c *gin.Context, role types.PlatformRole) {
+	t.Helper()
+
+	authcontext.SetPlatformRole(c, role)
+}

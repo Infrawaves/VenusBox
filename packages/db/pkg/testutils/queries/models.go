@@ -145,6 +145,12 @@ type EnvBuildAssignment struct {
 	CreatedAt pgtype.Timestamptz
 }
 
+type PlatformAdmin struct {
+	UserID    uuid.UUID
+	Role      string
+	CreatedAt time.Time
+}
+
 type ProjectLimit struct {
 	TeamID                   uuid.UUID
 	MaxLengthHours           int64

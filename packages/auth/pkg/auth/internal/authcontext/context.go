@@ -11,6 +11,7 @@ const (
 	teamContextKey          = "team"
 	userIDContextKey        = "user_id"
 	serviceIssuerContextKey = "service_issuer"
+	platformRoleContextKey  = "platform_role"
 )
 
 func SetUserID(c *gin.Context, userID uuid.UUID) {
@@ -74,4 +75,12 @@ func SetServiceIssuer(c *gin.Context, issuer string) {
 
 func GetServiceIssuer(c *gin.Context) (string, bool) {
 	return getFromGinContextSafely[string](c, serviceIssuerContextKey)
+}
+
+func SetPlatformRole(c *gin.Context, role types.PlatformRole) {
+	setInGinContext(c, platformRoleContextKey, role)
+}
+
+func GetPlatformRole(c *gin.Context) (types.PlatformRole, bool) {
+	return getFromGinContextSafely[types.PlatformRole](c, platformRoleContextKey)
 }

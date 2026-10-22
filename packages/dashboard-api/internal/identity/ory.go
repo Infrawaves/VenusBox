@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 
@@ -17,6 +18,14 @@ import (
 // identities up in batches of 500 and rely on a single request per batch.
 // https://www.ory.com/docs/kratos/reference/api (listIdentities, ids filter)
 const oryListIDsBatchSize = 500
+
+// Ory has no server-side substring/name filter, so SearchByProfile scans the
+// full identity list one keyset page at a time and matches locally. These bound
+// the scan so a search never walks an unbounded directory.
+const (
+	oryScanPageSize = 250
+	oryScanMaxPages = 200
+)
 
 type oryDirectory struct {
 	identities ory.IdentityAPI
@@ -141,6 +150,85 @@ func (d *oryDirectory) SearchByEmail(ctx context.Context, email string) ([]Ident
 	}
 
 	return identities, nil
+}
+
+// SearchByProfile scans the directory page by page and returns identities whose
+// email or name contains query (case-insensitive). Ory exposes no such filter,
+// so matching happens locally; the scan stops at limit matches or oryScanMaxPages.
+func (d *oryDirectory) SearchByProfile(ctx context.Context, query string, limit int) ([]Identity, error) {
+	normalized := strings.ToLower(strings.TrimSpace(query))
+	if normalized == "" || limit <= 0 {
+		return []Identity{}, nil
+	}
+
+	matches := make([]Identity, 0, limit)
+	pageToken := ""
+	for page := 0; page < oryScanMaxPages; page++ {
+		req := d.identities.ListIdentities(d.authCtx(ctx)).PageSize(oryScanPageSize)
+		if pageToken != "" {
+			req = req.PageToken(pageToken)
+		}
+
+		batch, resp, err := d.identities.ListIdentitiesExecute(req)
+		nextToken := ""
+		if resp != nil {
+			nextToken = nextPageToken(resp.Header.Get("Link"))
+			if resp.Body != nil {
+				_ = resp.Body.Close()
+			}
+		}
+		if err != nil {
+			return nil, fmt.Errorf("ory scan identities: %w", err)
+		}
+
+		for _, oryIdentity := range batch {
+			id, err := identityFromOry(oryIdentity)
+			if err != nil {
+				return nil, err
+			}
+			if strings.Contains(strings.ToLower(id.Email), normalized) ||
+				strings.Contains(strings.ToLower(id.Name), normalized) {
+				matches = append(matches, id)
+				if len(matches) >= limit {
+					return matches, nil
+				}
+			}
+		}
+
+		if len(batch) == 0 || nextToken == "" || nextToken == pageToken {
+			break
+		}
+		pageToken = nextToken
+	}
+
+	return matches, nil
+}
+
+// nextPageToken extracts the page_token of the rel="next" entry from an Ory
+// pagination Link header (RFC 5988). Returns "" when there is no next page.
+func nextPageToken(linkHeader string) string {
+	if linkHeader == "" {
+		return ""
+	}
+
+	for _, part := range strings.Split(linkHeader, ",") {
+		if !strings.Contains(part, `rel="next"`) {
+			continue
+		}
+		start := strings.Index(part, "<")
+		end := strings.Index(part, ">")
+		if start < 0 || end < 0 || end <= start {
+			continue
+		}
+		parsed, err := url.Parse(part[start+1 : end])
+		if err != nil {
+			return ""
+		}
+
+		return parsed.Query().Get("page_token")
+	}
+
+	return ""
 }
 
 func (d *oryDirectory) SetExternalID(ctx context.Context, subject string, externalID uuid.UUID) error {

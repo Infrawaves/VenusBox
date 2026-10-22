@@ -483,6 +483,10 @@ func (handlerTestIdentityProvider) FindProfilesByEmail(_ context.Context, email 
 	}}, nil
 }
 
+func (handlerTestIdentityProvider) FindUserIDsByQuery(context.Context, string, int) ([]uuid.UUID, error) {
+	return []uuid.UUID{}, nil
+}
+
 func (handlerTestIdentityProvider) TeamCreatorContext(context.Context, uuid.UUID) (*teamprovision.CreatorContextV1, error) {
 	return nil, nil
 }

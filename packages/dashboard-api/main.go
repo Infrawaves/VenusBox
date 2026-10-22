@@ -24,6 +24,7 @@ import (
 	"go.uber.org/zap/zapcore"
 
 	sharedauth "github.com/e2b-dev/infra/packages/auth/pkg/auth"
+	authtypes "github.com/e2b-dev/infra/packages/auth/pkg/types"
 	clickhouse "github.com/e2b-dev/infra/packages/clickhouse/pkg"
 	"github.com/e2b-dev/infra/packages/dashboard-api/internal/api"
 	"github.com/e2b-dev/infra/packages/dashboard-api/internal/cfg"
@@ -33,7 +34,9 @@ import (
 	internalteamprovision "github.com/e2b-dev/infra/packages/dashboard-api/internal/teamprovision"
 	sqlcdb "github.com/e2b-dev/infra/packages/db/client"
 	authdb "github.com/e2b-dev/infra/packages/db/pkg/auth"
+	"github.com/e2b-dev/infra/packages/db/pkg/dberrors"
 	"github.com/e2b-dev/infra/packages/db/pkg/pool"
+	"github.com/e2b-dev/infra/packages/db/queries"
 	e2benv "github.com/e2b-dev/infra/packages/shared/pkg/env"
 	"github.com/e2b-dev/infra/packages/shared/pkg/factories"
 	"github.com/e2b-dev/infra/packages/shared/pkg/featureflags"
@@ -270,7 +273,13 @@ func run() int {
 		nil,
 	)
 
-	s := newHTTPServer(config.Port, l, tel, swagger, authenticationFunc, featureFlags, apiStore)
+	if err := seedSuperAdmins(ctx, db, config.SuperAdminUserIDs); err != nil {
+		l.Error(ctx, "seeding super admins", zap.Error(err))
+
+		return 1
+	}
+
+	s := newHTTPServer(config.Port, l, tel, swagger, authenticationFunc, featureFlags, apiStore, platformRoleLookup(db))
 
 	signalCtx, sigCancel := signal.NotifyContext(ctx, syscall.SIGTERM, syscall.SIGINT)
 	defer sigCancel()
@@ -301,6 +310,46 @@ func run() int {
 	return 0
 }
 
+// platformRoleLookup adapts the db query to the auth middleware's lookup contract, mapping a missing row to ok=false.
+func platformRoleLookup(db *sqlcdb.Client) sharedauth.PlatformRoleLookup {
+	return func(ctx context.Context, userID uuid.UUID) (authtypes.PlatformRole, bool, error) {
+		role, err := db.GetPlatformRoleByUserID(ctx, userID)
+		if err != nil {
+			if dberrors.IsNotFoundError(err) {
+				return "", false, nil
+			}
+
+			return "", false, err
+		}
+
+		return authtypes.PlatformRole(role), true, nil
+	}
+}
+
+// seedSuperAdmins upserts each configured user UUID as super_admin. Invalid UUIDs fail fast rather than silently granting nothing.
+func seedSuperAdmins(ctx context.Context, db *sqlcdb.Client, userIDs []string) error {
+	for _, raw := range userIDs {
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" {
+			continue
+		}
+
+		userID, err := uuid.Parse(trimmed)
+		if err != nil {
+			return fmt.Errorf("invalid SUPER_ADMIN_USER_IDS entry %q: %w", trimmed, err)
+		}
+
+		if err := db.UpsertPlatformAdmin(ctx, queries.UpsertPlatformAdminParams{
+			UserID: userID,
+			Role:   string(authtypes.PlatformRoleSuperAdmin),
+		}); err != nil {
+			return fmt.Errorf("upsert super admin %s: %w", userID, err)
+		}
+	}
+
+	return nil
+}
+
 func main() {
 	os.Exit(run())
 }
@@ -313,6 +362,7 @@ func newHTTPServer(
 	authenticationFunc openapi3filter.AuthenticationFunc,
 	featureFlags *featureflags.Client,
 	store api.ServerInterface,
+	roleLookup sharedauth.PlatformRoleLookup,
 ) *http.Server {
 	r := gin.New()
 	r.Use(gin.Recovery())
@@ -384,6 +434,8 @@ func newHTTPServer(
 
 	r.Use(dashboardmiddleware.DisableLegacyTeamMutations(featureFlags))
 	r.Use(dashboardmiddleware.EnforceBlockedTeam())
+	r.Use(sharedauth.ResolvePlatformRole(roleLookup))
+	r.Use(dashboardmiddleware.EnforcePlatformRole())
 
 	api.RegisterHandlers(r, store)
 
