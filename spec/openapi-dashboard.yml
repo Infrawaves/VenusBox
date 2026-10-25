@@ -1171,6 +1171,14 @@ components:
         eventsTtlDays:
           type: integer
           format: int64
+        defaultFreeDiskSizeMb:
+          type: integer
+          format: int64
+          description: Present in the super-admin view; the free disk allowance per sandbox.
+        maxDiskSizeMb:
+          type: integer
+          format: int64
+          description: Present in the super-admin view; the max disk size ceiling.
 
     TeamLimitsResponse:
       type: object
