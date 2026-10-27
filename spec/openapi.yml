@@ -888,6 +888,19 @@ components:
           items:
             $ref: "#/components/schemas/SandboxVolumeMount"
 
+    SuperAdminSandbox:
+      description: A running sandbox with its owning team's id, for the cross-team super-admin view.
+      allOf:
+        - $ref: "#/components/schemas/ListedSandbox"
+        - type: object
+          required:
+            - teamID
+          properties:
+            teamID:
+              type: string
+              format: uuid
+              description: Identifier of the team that owns the sandbox
+
     SandboxesWithMetrics:
       required:
         - sandboxes
@@ -3983,6 +3996,29 @@ paths:
           $ref: "#/components/responses/401"
         "404":
           $ref: "#/components/responses/404"
+        "500":
+          $ref: "#/components/responses/500"
+
+  /super-admin/sandboxes:
+    get:
+      summary: List all running sandboxes across teams
+      description: Returns every running sandbox across all teams, each with its owning team's id. Requires a signed-in user with a platform role.
+      tags: [admin]
+      security:
+        - AuthProviderBearerAuth: []
+      responses:
+        "200":
+          description: Successfully returned all running sandboxes.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SuperAdminSandbox"
+        "401":
+          $ref: "#/components/responses/401"
+        "403":
+          $ref: "#/components/responses/403"
         "500":
           $ref: "#/components/responses/500"
 

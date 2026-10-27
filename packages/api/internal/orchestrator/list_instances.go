@@ -15,3 +15,11 @@ func (o *Orchestrator) GetSandboxes(ctx context.Context, teamID uuid.UUID, state
 
 	return o.sandboxStore.TeamItems(ctx, teamID, states)
 }
+
+// GetAllSandboxes returns instances across all teams, for platform-wide admin views.
+func (o *Orchestrator) GetAllSandboxes(ctx context.Context, states []sandbox.State) ([]sandbox.Sandbox, error) {
+	ctx, childSpan := tracer.Start(ctx, "get-all-sandboxes")
+	defer childSpan.End()
+
+	return o.sandboxStore.AllItems(ctx, states)
+}

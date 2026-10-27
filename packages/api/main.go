@@ -217,6 +217,10 @@ func NewGinServer(ctx context.Context, config cfg.Config, tel *telemetry.Client,
 	// the gin context) and before the handlers.
 	r.Use(customMiddleware.EnforceBlockedTeam())
 
+	// Resolve a signed-in user's platform role, then gate platform-role-restricted routes. Must run after auth.
+	r.Use(auth.ResolvePlatformRole(apiStore.PlatformRoleLookup())) //nolint:contextcheck // Gin middleware sets context via c.Request.WithContext
+	r.Use(customMiddleware.EnforcePlatformRole())
+
 	// We now register our store above as the handler for the interface
 	api.RegisterHandlersWithOptions(r, apiStore, api.GinServerOptions{
 		ErrorHandler: func(c *gin.Context, err error, statusCode int) {
@@ -433,6 +437,12 @@ func run() int {
 	//   context so it doesn't exit first.)
 	apiStore := handlers.NewAPIStore(ctx, tel, redisClient, featureFlags, config)
 	cleanupFns = append(cleanupFns, apiStore.Close)
+
+	if err := apiStore.SeedSuperAdmins(ctx, config.SuperAdminUserIDs); err != nil {
+		l.Error(ctx, "seeding super admins", zap.Error(err))
+
+		return 1
+	}
 
 	adminJWTVerifier, err := auth.NewJWKSVerifier(ctx, config.AdminAuthProvider, http.DefaultClient)
 	if err != nil {

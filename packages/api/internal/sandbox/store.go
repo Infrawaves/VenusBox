@@ -125,6 +125,25 @@ func (s *Store) TeamsWithSandboxes(ctx context.Context) (map[uuid.UUID]int64, er
 	return s.storage.TeamsWithSandboxCount(ctx)
 }
 
+// AllItems aggregates sandboxes across every team, for platform-wide admin views. It enumerates teams via the sandbox-count index, then reads each team's items in the given states.
+func (s *Store) AllItems(ctx context.Context, states []State) ([]Sandbox, error) {
+	teams, err := s.storage.TeamsWithSandboxCount(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	var all []Sandbox
+	for teamID := range teams {
+		items, err := s.storage.TeamItems(ctx, teamID, states)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, items...)
+	}
+
+	return all, nil
+}
+
 func (s *Store) Update(ctx context.Context, teamID uuid.UUID, sandboxID string, updateFunc func(sandbox Sandbox) (Sandbox, error)) (Sandbox, error) {
 	return s.storage.Update(ctx, teamID, sandboxID, updateFunc)
 }

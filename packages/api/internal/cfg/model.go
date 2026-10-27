@@ -33,6 +33,9 @@ const (
 type Config struct {
 	AdminToken string `env:"ADMIN_TOKEN"`
 
+	// SuperAdminUserIDs are internal user UUIDs seeded as super_admin on startup.
+	SuperAdminUserIDs []string `env:"SUPER_ADMIN_USER_IDS" envSeparator:","`
+
 	AnalyticsCollectorAPIToken string `env:"ANALYTICS_COLLECTOR_API_TOKEN"`
 	// AnalyticsCollectorHost is the hostname, or "host:port" address, of the
 	// analytics collector. Without a port, 443 is used. Empty disables
