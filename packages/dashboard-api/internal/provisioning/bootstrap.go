@@ -112,7 +112,9 @@ func (s *Service) bootstrapUser(ctx context.Context, profile bootstrapUserProfil
 			return ProvisionedTeam{}, err
 		}
 
-		return newProvisionedTeam(existingTeam.ID, existingTeam.Name, existingTeam.Email, existingTeam.Slug, existingTeam.IsBlocked, existingTeam.BlockedReason), nil
+		existingResult := newProvisionedTeam(existingTeam.ID, existingTeam.Name, existingTeam.Email, existingTeam.Slug, existingTeam.IsBlocked, existingTeam.BlockedReason)
+		existingResult.UserID = profile.UserID
+		return existingResult, nil
 	}
 	if !dberrors.IsNotFoundError(err) {
 		return ProvisionedTeam{}, fmt.Errorf("get default team: %w", err)
@@ -132,6 +134,7 @@ func (s *Service) bootstrapUser(ctx context.Context, profile bootstrapUserProfil
 			return ProvisionedTeam{}, err
 		}
 
+		landing.UserID = profile.UserID
 		return landing, nil
 	}
 
@@ -178,7 +181,9 @@ func (s *Service) bootstrapUser(ctx context.Context, profile bootstrapUserProfil
 		return ProvisionedTeam{}, err
 	}
 
-	return newProvisionedTeam(team.ID, team.Name, team.Email, team.Slug, team.IsBlocked, team.BlockedReason), nil
+	newUserResult := newProvisionedTeam(team.ID, team.Name, team.Email, team.Slug, team.IsBlocked, team.BlockedReason)
+	newUserResult.UserID = profile.UserID
+	return newUserResult, nil
 }
 
 func backfillIdentityExternalID(ctx context.Context, identityService identity.Service, oidcIdentity bootstrapUserIdentity, userID uuid.UUID) error {

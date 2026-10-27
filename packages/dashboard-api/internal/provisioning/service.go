@@ -36,6 +36,7 @@ func New(authDB *authdb.Client, identityService identity.Service, billing intern
 
 type ProvisionedTeam struct {
 	ID            uuid.UUID
+	UserID        uuid.UUID
 	Name          string
 	Email         string
 	Slug          string
