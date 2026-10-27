@@ -89,6 +89,9 @@ func (d *oryDirectory) GetIdentity(ctx context.Context, subject string) (Identit
 		_ = resp.Body.Close()
 	}
 	if err != nil {
+		if resp != nil && resp.StatusCode == http.StatusNotFound {
+			return Identity{}, fmt.Errorf("%w: %s", ErrIdentityNotFound, subject)
+		}
 		return Identity{}, fmt.Errorf("ory get identity: %w", err)
 	}
 
@@ -253,6 +256,9 @@ func (d *oryDirectory) SetExternalID(ctx context.Context, subject string, extern
 		_ = resp.Body.Close()
 	}
 	if err != nil {
+		if resp != nil && resp.StatusCode == http.StatusNotFound {
+			return fmt.Errorf("%w: %s", ErrIdentityNotFound, subject)
+		}
 		return fmt.Errorf("ory patch identity external id: %w", err)
 	}
 

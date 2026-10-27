@@ -183,6 +183,12 @@ func (s *Service) bootstrapUser(ctx context.Context, profile bootstrapUserProfil
 
 func backfillIdentityExternalID(ctx context.Context, identityService identity.Service, oidcIdentity bootstrapUserIdentity, userID uuid.UUID) error {
 	if err := identityService.SetIdentityExternalID(ctx, oidcIdentity.Issuer, oidcIdentity.Subject, userID); err != nil {
+		// Identity lives in an ORY the dashboard can't write to (imported user /
+		// split ORY): the PG user_identities link is authoritative, so the
+		// best-effort external_id backfill is safe to skip.
+		if errors.Is(err, identity.ErrIdentityNotFound) {
+			return nil
+		}
 		return fmt.Errorf("set identity external id: %w", err)
 	}
 

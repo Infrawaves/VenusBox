@@ -78,6 +78,11 @@ func (s *service) IdentityOrganizationID(ctx context.Context, issuer, subject st
 
 	id, err := directory.GetIdentity(ctx, subject)
 	if err != nil {
+		// Identity absent from the directory (e.g. imported user whose ORY lives
+		// elsewhere) has no SSO organization; let bootstrap continue.
+		if errors.Is(err, ErrIdentityNotFound) {
+			return uuid.Nil, nil
+		}
 		return uuid.Nil, err
 	}
 
