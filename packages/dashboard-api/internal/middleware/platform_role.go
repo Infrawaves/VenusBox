@@ -12,15 +12,17 @@ import (
 // platformRoleRoutes maps a guarded route to the minimum platform role it requires.
 // Global read-only views are platform_admin; high-risk operations should be super_admin.
 var platformRoleRoutes = map[string]types.PlatformRole{
-	http.MethodGet + " /super-admin/templates": types.PlatformRoleAdmin,
-	http.MethodGet + " /super-admin/builds":    types.PlatformRoleAdmin,
-	http.MethodGet + " /super-admin/teams":     types.PlatformRoleAdmin,
-	http.MethodGet + " /super-admin/users":     types.PlatformRoleAdmin,
-	http.MethodGet + " /super-admin/stats":     types.PlatformRoleAdmin,
+	http.MethodGet + " /super-admin/templates":     types.PlatformRoleAdmin,
+	http.MethodGet + " /super-admin/builds":        types.PlatformRoleAdmin,
+	http.MethodGet + " /super-admin/teams":         types.PlatformRoleAdmin,
+	http.MethodGet + " /super-admin/users":         types.PlatformRoleAdmin,
+	http.MethodGet + " /super-admin/stats":         types.PlatformRoleAdmin,
 	http.MethodGet + " /super-admin/teams/:teamID": types.PlatformRoleAdmin,
 	http.MethodGet + " /super-admin/users/:userID": types.PlatformRoleAdmin,
+	http.MethodGet + " /super-admin/snapshots":     types.PlatformRoleAdmin,
 
 	// Admin management and quota edits are super_admin only (high-risk writes).
+	http.MethodDelete + " /super-admin/teams/:teamID":               types.PlatformRoleSuperAdmin,
 	http.MethodPut + " /super-admin/teams/:teamID/limits":           types.PlatformRoleSuperAdmin,
 	http.MethodPut + " /super-admin/teams/:teamID/block":            types.PlatformRoleSuperAdmin,
 	http.MethodGet + " /super-admin/admins":                         types.PlatformRoleSuperAdmin,

@@ -17,16 +17,37 @@ import (
 	"github.com/e2b-dev/infra/packages/shared/pkg/utils"
 )
 
-// superAdminTemplatesSort is fixed: the global view paginates by creation time descending only.
-const superAdminTemplatesSort = templatesSortCreatedAtDesc
+// parseSuperAdminTemplatesSort resolves the super-admin sort param. The global
+// view supports only creation-time ordering (both directions); updated_at sorts
+// would need an extra query pair and aren't needed here.
+func parseSuperAdminTemplatesSort(value *api.GetSuperAdminTemplatesParamsSort) (templatesSort, error) {
+	if value == nil {
+		return templatesSortCreatedAtDesc, nil
+	}
+
+	switch templatesSort(*value) {
+	case templatesSortCreatedAtAsc, templatesSortCreatedAtDesc:
+		return templatesSort(*value), nil
+	default:
+		return "", errors.New("unsupported sort")
+	}
+}
 
 func (s *APIStore) GetSuperAdminTemplates(c *gin.Context, params api.GetSuperAdminTemplatesParams) {
 	ctx := c.Request.Context()
 	telemetry.ReportEvent(ctx, "list all templates (super-admin)")
 
+	sort, err := parseSuperAdminTemplatesSort(params.Sort)
+	if err != nil {
+		s.sendAPIStoreError(c, http.StatusBadRequest, "sort must be created_at_asc or created_at_desc")
+
+		return
+	}
+	asc := sort == templatesSortCreatedAtAsc
+
 	limit := normalizeTemplatesLimit(params.Limit)
 
-	cursorValue, cursorID, err := parseTemplatesCursor(params.Cursor, superAdminTemplatesSort)
+	cursorValue, cursorID, err := parseTemplatesCursor(params.Cursor, sort)
 	if err != nil {
 		if errors.Is(err, errTemplatesCursorSortMismatch) {
 			s.sendAPIStoreError(c, http.StatusBadRequest, "Cursor was issued for a different sort; clear the cursor and restart")
@@ -43,15 +64,38 @@ func (s *APIStore) GetSuperAdminTemplates(c *gin.Context, params api.GetSuperAdm
 
 		return
 	}
-	ct, cid := timeCursor(cursorTs, cursorID, true)
+	ct, cid := timeCursor(cursorTs, cursorID, !asc)
 
-	rows, err := s.db.Dashboard.ListAllTemplatesByCreatedAtDesc(ctx, dashboardqueries.ListAllTemplatesByCreatedAtDescParams{
-		Search:          strings.TrimSpace(utils.DerefOrDefault(params.Search, "")),
-		Public:          params.Public,
-		CursorCreatedAt: ct,
-		CursorID:        cid,
-		LimitPlusOne:    limit + 1,
-	})
+	search := strings.TrimSpace(utils.DerefOrDefault(params.Search, ""))
+
+	var rows []dashboardqueries.ListAllTemplatesByCreatedAtDescRow
+	if asc {
+		ascRows, qErr := s.db.Dashboard.ListAllTemplatesByCreatedAtAsc(ctx, dashboardqueries.ListAllTemplatesByCreatedAtAscParams{
+			Search:          search,
+			Public:          params.Public,
+			TeamID:          params.TeamId,
+			CursorCreatedAt: ct,
+			CursorID:        cid,
+			LimitPlusOne:    limit + 1,
+		})
+		if qErr != nil {
+			err = qErr
+		} else {
+			rows = make([]dashboardqueries.ListAllTemplatesByCreatedAtDescRow, len(ascRows))
+			for i, r := range ascRows {
+				rows[i] = dashboardqueries.ListAllTemplatesByCreatedAtDescRow(r)
+			}
+		}
+	} else {
+		rows, err = s.db.Dashboard.ListAllTemplatesByCreatedAtDesc(ctx, dashboardqueries.ListAllTemplatesByCreatedAtDescParams{
+			Search:          search,
+			Public:          params.Public,
+			TeamID:          params.TeamId,
+			CursorCreatedAt: ct,
+			CursorID:        cid,
+			LimitPlusOne:    limit + 1,
+		})
+	}
 	if err != nil {
 		logger.L().Error(ctx, "Error listing all templates", zap.Error(err))
 		s.sendAPIStoreError(c, http.StatusInternalServerError, "Error when listing templates")
@@ -72,7 +116,7 @@ func (s *APIStore) GetSuperAdminTemplates(c *gin.Context, params api.GetSuperAdm
 	var nextCursor *string
 	if hasMore && len(rows) > 0 {
 		last := rows[len(rows)-1]
-		cursor := formatTemplatesCursor(superAdminTemplatesSort, last.CreatedAt.UTC().Format(time.RFC3339Nano), last.TemplateID)
+		cursor := formatTemplatesCursor(sort, last.CreatedAt.UTC().Format(time.RFC3339Nano), last.TemplateID)
 		nextCursor = &cursor
 	}
 

@@ -79,12 +79,8 @@ func (s *APIStore) PostSuperAdminAdmins(c *gin.Context) {
 		return
 	}
 
-	role := string(body.Role)
-	if role != "platform_admin" && role != "super_admin" {
-		s.sendAPIStoreError(c, http.StatusBadRequest, "role must be platform_admin or super_admin")
-
-		return
-	}
+	// Only super_admin can be granted from the dashboard; platform_admin is retired.
+	const role = "super_admin"
 
 	profiles, err := s.identityService.FindProfilesByEmail(ctx, string(body.Email))
 	if err != nil {

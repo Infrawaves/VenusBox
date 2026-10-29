@@ -94,6 +94,39 @@ components:
       description: Cursor returned by the previous list response in `created_at|build_id` format.
       schema:
         type: string
+    snapshots_search:
+      name: search
+      in: query
+      required: false
+      description: Case-insensitive substring match on sandbox id, base template id/alias, or team name.
+      schema:
+        type: string
+    snapshots_team:
+      name: team_id
+      in: query
+      required: false
+      description: Filter snapshots to a single owning team.
+      schema:
+        type: string
+        format: uuid
+    snapshots_limit:
+      name: limit
+      in: query
+      required: false
+      description: Maximum number of items to return per page.
+      schema:
+        type: integer
+        format: int32
+        minimum: 1
+        maximum: 100
+        default: 50
+    snapshots_cursor:
+      name: cursor
+      in: query
+      required: false
+      description: Cursor returned by the previous list response in `created_at|snapshot_id` format.
+      schema:
+        type: string
     build_id_or_template:
       name: build_id_or_template
       in: query
@@ -259,6 +292,14 @@ components:
         type: string
         enum: [created_at_asc, created_at_desc, updated_at_asc, updated_at_desc]
         default: created_at_desc
+    templates_team:
+      name: team_id
+      in: query
+      required: false
+      description: Filter templates to a single owning team.
+      schema:
+        type: string
+        format: uuid
     tag_assignments_cursor:
       name: cursor
       in: query
@@ -372,19 +413,13 @@ components:
 
     GrantPlatformAdminRequest:
       type: object
-      description: Grant (or update) a platform role to the user with this email.
+      description: Grant super-admin to the user with this email.
       required:
         - email
-        - role
       properties:
         email:
           type: string
           format: email
-        role:
-          type: string
-          enum:
-            - platform_admin
-            - super_admin
 
     PlatformAdminEntry:
       type: object
@@ -460,6 +495,96 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/SuperAdminBuild"
+        nextCursor:
+          type: string
+          nullable: true
+          description: Cursor to pass to the next list request, or `null` if there is no next page.
+
+    SuperAdminSnapshot:
+      type: object
+      description: A currently-paused sandbox (snapshot) with team attribution and resource config, for the cross-team super-admin view.
+      required:
+        - snapshotID
+        - sandboxID
+        - envID
+        - baseTemplateID
+        - teamID
+        - teamName
+        - sandboxStartedAt
+        - pausedAt
+        - autoPause
+        - envSecure
+        - cpuCount
+        - memoryMB
+      properties:
+        snapshotID:
+          type: string
+          format: uuid
+          description: The snapshot row id.
+        sandboxID:
+          type: string
+          description: The sandbox this snapshot was derived from.
+        envID:
+          type: string
+          description: The snapshot's own env id.
+        baseTemplateID:
+          type: string
+          description: The base template env id the sandbox was started from.
+        baseTemplateAlias:
+          type: string
+          description: Human-readable alias of the base template, if any.
+        teamID:
+          type: string
+          format: uuid
+        teamName:
+          type: string
+        sandboxStartedAt:
+          type: string
+          format: date-time
+          description: When the original sandbox was started.
+        pausedAt:
+          type: string
+          format: date-time
+          description: When the sandbox was paused (snapshot row creation time).
+        autoPause:
+          type: boolean
+          description: Whether the sandbox was auto-paused (vs explicitly paused).
+        originNodeID:
+          type: string
+          description: The node the snapshot was written on.
+        envSecure:
+          type: boolean
+        allowInternetAccess:
+          type: boolean
+          nullable: true
+        cpuCount:
+          type: integer
+          format: int64
+        memoryMB:
+          type: integer
+          format: int64
+        diskSizeMB:
+          type: integer
+          format: int64
+          nullable: true
+        envdVersion:
+          type: string
+          nullable: true
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+
+    SuperAdminSnapshotsResponse:
+      type: object
+      required:
+        - data
+        - nextCursor
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/SuperAdminSnapshot"
         nextCursor:
           type: string
           nullable: true
@@ -1981,6 +2106,29 @@ paths:
           $ref: "#/components/responses/404"
         "500":
           $ref: "#/components/responses/500"
+    delete:
+      summary: Delete a team
+      description: Deletes a team only if it owns no blocking resources (envs, snapshots, volumes). Teams with any such resources return 409 and are left untouched; removing those requires the orchestrator. Requires a signed-in super-admin.
+      tags: [super-admin]
+      security:
+        - AuthProviderBearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/teamID"
+      responses:
+        "204":
+          description: Team deleted.
+        "401":
+          $ref: "#/components/responses/401"
+        "403":
+          $ref: "#/components/responses/403"
+        "409":
+          description: Team still owns resources and cannot be deleted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/500"
 
   /super-admin/teams/{teamID}/limits:
     put:
@@ -2205,6 +2353,34 @@ paths:
         "500":
           $ref: "#/components/responses/500"
 
+  /super-admin/snapshots:
+    get:
+      summary: List all paused sandboxes (snapshots) across teams
+      description: Returns a paginated list of currently-paused sandboxes across all teams, each with its owning team, base template, pause time, and resource config. Requires a signed-in user with a platform role. Keyset cursor pagination ordered by pause time (newest first).
+      tags: [super-admin]
+      security:
+        - AuthProviderBearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/snapshots_search"
+        - $ref: "#/components/parameters/snapshots_team"
+        - $ref: "#/components/parameters/snapshots_limit"
+        - $ref: "#/components/parameters/snapshots_cursor"
+      responses:
+        "200":
+          description: Successfully returned paginated snapshots.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuperAdminSnapshotsResponse"
+        "400":
+          $ref: "#/components/responses/400"
+        "401":
+          $ref: "#/components/responses/401"
+        "403":
+          $ref: "#/components/responses/403"
+        "500":
+          $ref: "#/components/responses/500"
+
   /super-admin/me:
     get:
       summary: Get the signed-in user's platform role
@@ -2325,6 +2501,8 @@ paths:
       parameters:
         - $ref: "#/components/parameters/templates_search"
         - $ref: "#/components/parameters/templates_public"
+        - $ref: "#/components/parameters/templates_team"
+        - $ref: "#/components/parameters/templates_sort"
         - $ref: "#/components/parameters/templates_limit"
         - $ref: "#/components/parameters/templates_cursor"
       responses:
