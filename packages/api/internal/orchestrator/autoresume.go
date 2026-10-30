@@ -39,6 +39,7 @@ func (o *Orchestrator) HandleExistingSandboxAutoResume(
 					ctx,
 					"Sandbox is still transitioning after auto-resume retries",
 					logger.WithSandboxID(sandboxID),
+					logger.WithTeamID(teamID.String()),
 					zap.String("state", string(sbx.State)),
 					zap.Int("attempts", attempts),
 				)
@@ -49,10 +50,10 @@ func (o *Orchestrator) HandleExistingSandboxAutoResume(
 			attempts++
 			waitErrMsg := "error waiting for sandbox to pause"
 			if sbx.State == apisandbox.StatePausing {
-				logger.L().Debug(ctx, "Waiting for sandbox to pause before auto-resume", logger.WithSandboxID(sandboxID), zap.Int("attempt", attempts))
+				logger.L().Debug(ctx, "Waiting for sandbox to pause before auto-resume", logger.WithSandboxID(sandboxID), logger.WithTeamID(teamID.String()), zap.Int("attempt", attempts))
 			} else {
 				waitErrMsg = "error waiting for sandbox snapshot to finish"
-				logger.L().Debug(ctx, "Waiting for sandbox snapshot to finish before auto-resume", logger.WithSandboxID(sandboxID), zap.Int("attempt", attempts))
+				logger.L().Debug(ctx, "Waiting for sandbox snapshot to finish before auto-resume", logger.WithSandboxID(sandboxID), logger.WithTeamID(teamID.String()), zap.Int("attempt", attempts))
 			}
 
 			err := o.WaitForStateChange(transitionCtx, teamID, sandboxID)
@@ -62,6 +63,7 @@ func (o *Orchestrator) HandleExistingSandboxAutoResume(
 						ctx,
 						"Sandbox transition wait timed out during auto-resume",
 						logger.WithSandboxID(sandboxID),
+						logger.WithTeamID(teamID.String()),
 						zap.String("state", string(sbx.State)),
 						zap.Int("attempt", attempts),
 						zap.Duration("budget", transitionWaitBudget),
@@ -89,13 +91,13 @@ func (o *Orchestrator) HandleExistingSandboxAutoResume(
 
 			return nil, false, fmt.Errorf("failed to refresh sandbox state: %w", getSandboxErr)
 		case apisandbox.StateKilling:
-			logger.L().Debug(ctx, "Sandbox is being killed, cannot auto-resume", logger.WithSandboxID(sandboxID))
+			logger.L().Debug(ctx, "Sandbox is being killed, cannot auto-resume", logger.WithSandboxID(sandboxID), logger.WithTeamID(teamID.String()))
 
 			return nil, false, apisandbox.ErrNotFound
 		case apisandbox.StateRunning:
 			return o.runningSandboxResumeResponse(ctx, teamID, sandboxID, sbx)
 		default:
-			logger.L().Error(ctx, "Sandbox is in an unknown state during auto-resume", logger.WithSandboxID(sandboxID), zap.String("state", string(sbx.State)))
+			logger.L().Error(ctx, "Sandbox is in an unknown state during auto-resume", logger.WithSandboxID(sandboxID), logger.WithTeamID(teamID.String()), zap.String("state", string(sbx.State)))
 
 			return nil, false, errors.New("sandbox is in an unknown state")
 		}

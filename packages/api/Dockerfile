@@ -7,6 +7,9 @@ FROM --platform=$BUILDPLATFORM golang:${GOLANG_VERSION}-alpine${ALPINE_VERSION} 
 ENV GOPROXY=https://proxy.golang.org|https://proxy.golang.org:443|https://proxy.golang.org/|direct
 ARG TARGETARCH
 
+ENV GOSUMDB=sum.golang.org
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
+
 RUN apk add --no-cache make
 
 # Copy all module dependency files at once for better Docker layer caching
@@ -23,6 +26,28 @@ RUN --mount=type=cache,target=/go/pkg/mod cd /build/shared && go mod download &&
     cd /build/db && go mod download && \
     cd /build/auth && go mod download && \
     cd /build/api && go mod download
+
+
+# Cached golang dependencies
+WORKDIR /build/shared
+COPY ./shared/go.mod ./shared/go.sum ./
+RUN go mod download
+
+WORKDIR /build/clickhouse
+COPY ./clickhouse/go.mod ./clickhouse/go.sum ./
+RUN go mod download
+
+WORKDIR /build/db
+COPY ./db/go.mod ./db/go.sum ./
+RUN go mod download
+
+WORKDIR /build/auth
+COPY ./auth/go.mod ./auth/go.sum ./
+RUN go mod download
+
+WORKDIR /build/api
+COPY ./api/go.mod ./api/go.sum ./
+RUN go mod download
 
 # Copy source code
 WORKDIR /build

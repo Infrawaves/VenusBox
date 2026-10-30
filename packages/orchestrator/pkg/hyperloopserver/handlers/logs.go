@@ -79,7 +79,7 @@ func (h *APIStore) Logs(c *gin.Context) {
 	payload := make(map[string]any)
 	if err := c.ShouldBindJSON(&payload); err != nil {
 		h.sendAPIStoreError(c, http.StatusBadRequest, "Invalid body for logs")
-		h.logger.Error(ctx, "error when parsing sandbox logs request", zap.Error(err), logger.WithSandboxID(sbxID))
+		h.logger.Error(ctx, "error when parsing sandbox logs request", zap.Error(err), logger.WithSandboxID(sbxID), logger.WithTeamID(sbx.Runtime.TeamID))
 
 		return
 	}
@@ -89,7 +89,7 @@ func (h *APIStore) Logs(c *gin.Context) {
 		h.sendAPIStoreError(c, http.StatusBadRequest, "Invalid sandboxID in logs payload")
 		// Inflight logs with old sandboxID from snapshotted sandbox
 		// Change to error once we have a way how to tell sandbox to flush and stop sending logs when being paused
-		h.logger.Warn(ctx, "error when parsing sandbox logs request", zap.Error(err), logger.WithSandboxID(sbxID))
+		h.logger.Warn(ctx, "error when parsing sandbox logs request", zap.Error(err), logger.WithSandboxID(sbxID), logger.WithTeamID(sbx.Runtime.TeamID))
 
 		return
 	}
@@ -101,6 +101,7 @@ func (h *APIStore) Logs(c *gin.Context) {
 			ctx,
 			"dropping envd log with a stale pre-resume timestamp",
 			logger.WithSandboxID(sbxID),
+			logger.WithTeamID(sbx.Runtime.TeamID),
 		)
 
 		return
@@ -121,7 +122,7 @@ func (h *APIStore) Logs(c *gin.Context) {
 	logs, err := json.Marshal(payload)
 	if err != nil {
 		h.sendAPIStoreError(c, http.StatusInternalServerError, "Error when parsing logs payload")
-		h.logger.Error(ctx, "error when parsing logs payload", zap.Error(err), logger.WithSandboxID(sbxID))
+		h.logger.Error(ctx, "error when parsing logs payload", zap.Error(err), logger.WithSandboxID(sbxID), logger.WithTeamID(sbx.Runtime.TeamID))
 
 		return
 	}
@@ -167,7 +168,7 @@ func (h *APIStore) Logs(c *gin.Context) {
 	if err := h.forwardLogs(c.Request.Context(), route.PrimaryURL, logs, route.Timeout); err != nil {
 		recordLogForwardWrite(ctx, "primary", "failure", "send_error")
 		h.sendAPIStoreError(c, http.StatusInternalServerError, "Error when forwarding sandbox logs")
-		h.logger.Error(ctx, "error when forwarding sandbox logs", zap.Error(err), logger.WithSandboxID(sbxID))
+		h.logger.Error(ctx, "error when forwarding sandbox logs", zap.Error(err), logger.WithSandboxID(sbxID), logger.WithTeamID(sbx.Runtime.TeamID))
 
 		return
 	}

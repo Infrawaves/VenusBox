@@ -322,7 +322,7 @@ func (o *Orchestrator) CreateSandbox(
 				Retryable: apierrors.CanRetry,
 			}
 		default:
-			logger.L().Error(ctx, "failed to reserve sandbox for team", logger.WithSandboxID(sandboxID), zap.Error(err))
+			logger.L().Error(ctx, "failed to reserve sandbox for team", logger.WithSandboxID(sandboxID), logger.WithTeamID(team.ID.String()), zap.Error(err))
 
 			return sandbox.Sandbox{}, &api.APIError{
 				Code:      http.StatusInternalServerError,
@@ -349,11 +349,11 @@ func (o *Orchestrator) CreateSandbox(
 		// Mark as a joined request for telemetry purposes
 		joined.Mark(ctx)
 
-		logger.L().Info(ctx, "sandbox is already being started, waiting for it to be ready", logger.WithSandboxID(sandboxID))
+		logger.L().Info(ctx, "sandbox is already being started, waiting for it to be ready", logger.WithSandboxID(sandboxID), logger.WithTeamID(team.ID.String()))
 
 		sbx, err = waitForStart(ctx)
 		if err != nil {
-			logger.L().Warn(ctx, "Error waiting for sandbox to start", zap.Error(err), logger.WithSandboxID(sandboxID))
+			logger.L().Warn(ctx, "Error waiting for sandbox to start", zap.Error(err), logger.WithSandboxID(sandboxID), logger.WithTeamID(team.ID.String()))
 
 			if apiErr, ok := errors.AsType[*api.APIError](err); ok {
 				return sandbox.Sandbox{}, apiErr
@@ -666,6 +666,7 @@ func (o *Orchestrator) CreateSandbox(
 			logger.L().Error(ctx, "Error removing memory-restored sandbox after unhonored filesystem-boot demand",
 				zap.Error(killErr),
 				logger.WithSandboxID(sbx.SandboxID),
+				logger.WithTeamID(sbx.TeamID.String()),
 			)
 		}
 
@@ -696,6 +697,7 @@ func (o *Orchestrator) CreateSandbox(
 				logger.L().Error(ctx, "Error removing sandbox",
 					zap.Error(killErr),
 					logger.WithSandboxID(sbxToRemove.SandboxID),
+					logger.WithTeamID(sbxToRemove.TeamID.String()),
 					zap.String("kill_reason", sandbox.KillReasonUnknown.String()),
 				)
 			}
@@ -748,6 +750,7 @@ func (o *Orchestrator) maybeRemapResumeOriginNode(ctx context.Context, sandboxID
 		logger.L().Warn(wctx, "failed to remap resume origin node",
 			zap.Error(err),
 			logger.WithSandboxID(sandboxID),
+			logger.WithTeamID(team.ID.String()),
 		)
 
 		return
@@ -764,6 +767,7 @@ func (o *Orchestrator) maybeRemapResumeOriginNode(ctx context.Context, sandboxID
 
 	logger.L().Info(wctx, "remapped resume origin node to the node a previous resume timed out on",
 		logger.WithSandboxID(sandboxID),
+		logger.WithTeamID(team.ID.String()),
 		zap.String("old_origin_node_id", oldNodeID),
 		zap.String("new_origin_node_id", newNode.ID),
 	)

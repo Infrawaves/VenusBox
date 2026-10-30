@@ -69,7 +69,7 @@ func (a *APIStore) DeleteSandboxesSandboxID(
 	case err == nil:
 		killedOrRemoved = true
 	case errors.Is(err, orchestrator.ErrSandboxNotFound):
-		logger.L().Debug(ctx, "Running sandbox not found", logger.WithSandboxID(sandboxID))
+			logger.L().Debug(ctx, "Running sandbox not found", logger.WithSandboxID(sandboxID), logger.WithTeamID(teamID.String()))
 	case errors.Is(err, orchestrator.ErrSandboxOperationFailed):
 		a.sendAPIStoreError(c, http.StatusInternalServerError, fmt.Sprintf("Error killing sandbox: %s", err))
 
@@ -98,7 +98,7 @@ func (a *APIStore) DeleteSandboxesSandboxID(
 	if killedOrRemoved {
 		c.Status(http.StatusNoContent)
 	} else {
-		logger.L().Debug(ctx, "Sandbox not found for deletion", logger.WithSandboxID(sandboxID))
+			logger.L().Debug(ctx, "Sandbox not found for deletion", logger.WithSandboxID(sandboxID), logger.WithTeamID(teamID.String()))
 		a.sendAPIStoreError(c, http.StatusNotFound, utils.SandboxNotFoundMsg(sandboxID))
 	}
 }

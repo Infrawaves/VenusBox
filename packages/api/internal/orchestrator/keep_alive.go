@@ -47,7 +47,7 @@ func (o *Orchestrator) KeepAliveFor(ctx context.Context, teamID uuid.UUID, sandb
 			return sbx, errNodeNotInPool
 		}
 
-		logger.L().Debug(ctx, "sandbox ttl updated", logger.WithSandboxID(sbx.SandboxID), logger.Time("end_time", endTime))
+		logger.L().Debug(ctx, "sandbox ttl updated", logger.WithSandboxID(sbx.SandboxID), logger.WithTeamID(teamID.String()), logger.Time("end_time", endTime))
 		sbx.EndTime = endTime
 
 		return sbx, nil

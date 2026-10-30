@@ -11,11 +11,11 @@ $(if $(HOSTNAME),,$(error Failed to determine hostname: both 'hostname' and 'hos
 # the published repository, where this package sits at packages/api.
 expectedMigration := $(shell ls ../db/migrations | sed 's/_.*//' | sort | tail -n 1)
 
-ifeq ($(PROVIDER),aws)
-	REGISTRY_PREFIX := $(AWS_ACCOUNT_ID).dkr.ecr.$(AWS_REGION).amazonaws.com/$(PREFIX)core
-else
-	REGISTRY_PREFIX := $(GCP_REGION)-docker.pkg.dev/$(GCP_PROJECT_ID)/$(PREFIX)core
-endif
+# Volcengine configuration
+VOLC_REGISTRY ?= bp-dockerhub-relay-cn-hongkong.cr.volces.com
+VOLC_NAMESPACE ?= e2b
+VOLC_IMAGE_PREFIX := $(VOLC_REGISTRY)/$(VOLC_NAMESPACE)
+IMAGE_TAG ?= 2026.30
 
 # E2B-hosted registry repo holding released, prebuilt api AND db-migrator
 # images — they release as one unit from this package's docker-bake.hcl.
@@ -119,32 +119,18 @@ profiler:
 
 .PHONY: build-and-upload
 build-and-upload:
-ifeq ($(strip $(API_VERSION)),)
-	# Existing flow: bake both images from source and push to the client's
-	# own core repo.
+	# Build the api image from source and push to the client's
+	# own core repo (Volcengine).
 	$(eval COMMIT_SHA := $(shell git rev-parse --short HEAD))
 	$(eval EXPECTED_MIGRATION_TIMESTAMP := $(expectedMigration))
-	cd .. && REGISTRY_PREFIX=$(REGISTRY_PREFIX) \
-		COMMIT_SHA=$(COMMIT_SHA) \
-		EXPECTED_MIGRATION_TIMESTAMP=$(EXPECTED_MIGRATION_TIMESTAMP) \
-		PLATFORMS=$(BUILD_PLATFORM) \
-		docker buildx bake -f api/docker-bake.hcl --push
-else
-	# Released-image flow: pull the prebuilt, versioned api + db-migrator
-	# images from the E2B artifacts registry and retag/push them into the
-	# client's own core repo.
-	@echo "Using released api + db-migrator $(API_VERSION) from $(E2B_ARTIFACTS_REGISTRY)"
-	docker pull --platform $(BUILD_PLATFORM) $(E2B_ARTIFACTS_REGISTRY)/api:$(API_VERSION)
-	docker pull --platform $(BUILD_PLATFORM) $(E2B_ARTIFACTS_REGISTRY)/db-migrator:$(API_VERSION)
-	docker tag $(E2B_ARTIFACTS_REGISTRY)/api:$(API_VERSION) $(REGISTRY_PREFIX)/api:latest
-	docker tag $(E2B_ARTIFACTS_REGISTRY)/api:$(API_VERSION) $(REGISTRY_PREFIX)/api:$(API_VERSION)
-	docker tag $(E2B_ARTIFACTS_REGISTRY)/db-migrator:$(API_VERSION) $(REGISTRY_PREFIX)/db-migrator:latest
-	docker tag $(E2B_ARTIFACTS_REGISTRY)/db-migrator:$(API_VERSION) $(REGISTRY_PREFIX)/db-migrator:$(API_VERSION)
-	docker push $(REGISTRY_PREFIX)/api:latest
-	docker push $(REGISTRY_PREFIX)/api:$(API_VERSION)
-	docker push $(REGISTRY_PREFIX)/db-migrator:latest
-	docker push $(REGISTRY_PREFIX)/db-migrator:$(API_VERSION)
-endif
+	@echo "Building and pushing to Volcengine: $(VOLC_IMAGE_PREFIX)/api:$(IMAGE_TAG)"
+	@docker build \
+	    --tag "$(VOLC_IMAGE_PREFIX)/api:$(IMAGE_TAG)" \
+	    --build-arg COMMIT_SHA="$(COMMIT_SHA)" \
+	    --build-arg EXPECTED_MIGRATION_TIMESTAMP="$(EXPECTED_MIGRATION_TIMESTAMP)" \
+	    -f ./Dockerfile ..
+	@echo "Pushing image to Volcengine..."
+	@docker push "$(VOLC_IMAGE_PREFIX)/api:$(IMAGE_TAG)"
 
 .PHONY: test
 test:

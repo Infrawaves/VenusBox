@@ -14,6 +14,8 @@ FROM golang:${GOLANG_VERSION}-${DEBIAN_VERSION} AS builder
 ENV GOPROXY=https://proxy.golang.org|https://proxy.golang.org:443|https://proxy.golang.org/|direct
 ARG TARGETARCH
 
+ENV GOSUMDB=sum.golang.org
+
 # Cached golang dependencies
 WORKDIR /build/shared
 COPY ./shared/go.mod ./shared/go.sum ./

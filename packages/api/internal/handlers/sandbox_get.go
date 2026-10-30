@@ -164,7 +164,7 @@ func (a *APIStore) GetSandboxesSandboxID(c *gin.Context, id string) {
 			state = api.Paused
 		// Sandbox is being stopped or already is stopped, user can't work with it anymore
 		case sandbox.StateKilling:
-			logger.L().Debug(ctx, "Sandbox is being killed", logger.WithSandboxID(sandboxId))
+			logger.L().Debug(ctx, "Sandbox is being killed", logger.WithSandboxID(sandboxId), logger.WithTeamID(team.ID.String()))
 			a.sendAPIStoreError(c, http.StatusNotFound, utils.SandboxNotFoundMsg(id))
 
 			return
@@ -232,7 +232,7 @@ func (a *APIStore) GetSandboxesSandboxID(c *gin.Context, id string) {
 	if lastSnapshot.EnvBuild.TotalDiskSizeMb != nil {
 		diskSize = int32(*lastSnapshot.EnvBuild.TotalDiskSizeMb)
 	} else {
-		logger.L().Error(ctx, "disk size is not set for the sandbox", logger.WithSandboxID(id))
+		logger.L().Error(ctx, "disk size is not set for the sandbox", logger.WithSandboxID(id), logger.WithTeamID(team.ID.String()))
 	}
 
 	// This shouldn't happen - if yes, the data are in corrupted state,
@@ -241,7 +241,7 @@ func (a *APIStore) GetSandboxesSandboxID(c *gin.Context, id string) {
 	if lastSnapshot.EnvBuild.EnvdVersion != nil {
 		envdVersion = *lastSnapshot.EnvBuild.EnvdVersion
 	} else {
-		logger.L().Error(ctx, "envd version is not set for the sandbox", logger.WithSandboxID(id))
+		logger.L().Error(ctx, "envd version is not set for the sandbox", logger.WithSandboxID(id), logger.WithTeamID(team.ID.String()))
 	}
 
 	var sbxAccessToken *string = nil

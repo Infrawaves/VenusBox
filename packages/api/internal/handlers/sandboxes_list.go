@@ -419,14 +419,14 @@ func snapshotsToPaginatedSandboxes(ctx context.Context, snapshots []queries.GetS
 		if record.BuildTotalDiskSizeMb != nil {
 			diskSize = int32(*record.BuildTotalDiskSizeMb)
 		} else {
-			logger.L().Error(ctx, "disk size is not set for the sandbox", logger.WithSandboxID(snapshot.SandboxID))
+			logger.L().Error(ctx, "disk size is not set for the sandbox", logger.WithSandboxID(snapshot.SandboxID), logger.WithTeamID(snapshot.TeamID.String()))
 		}
 
 		envdVersion := ""
 		if record.BuildEnvdVersion != nil {
 			envdVersion = *record.BuildEnvdVersion
 		} else {
-			logger.L().Error(ctx, "envd version is not set for the sandbox", logger.WithSandboxID(snapshot.SandboxID))
+			logger.L().Error(ctx, "envd version is not set for the sandbox", logger.WithSandboxID(snapshot.SandboxID), logger.WithTeamID(snapshot.TeamID.String()))
 		}
 
 		sandbox := utils.PaginatedSandbox{

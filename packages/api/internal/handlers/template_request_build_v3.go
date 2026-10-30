@@ -102,7 +102,8 @@ func requestTemplateBuild(ctx context.Context, c *gin.Context, a *APIStore, body
 	findTemplateCtx, span := tracer.Start(ctx, "find-template-alias")
 	defer span.End()
 	templateID := id.Generate()
-	public := false
+	// 模版build默认是public
+	public := true
 	replacesTemplateID := ""
 
 	aliasInfo, metadata, err := a.templateCache.ResolveAliasWithMetadata(findTemplateCtx, identifier, team.Slug)

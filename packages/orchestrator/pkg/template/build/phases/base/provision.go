@@ -187,6 +187,7 @@ func (bb *BaseBuilder) provisionSandbox(
 				ctx,
 				"removed proxy from pool",
 				logger.WithSandboxID(sbx.Runtime.SandboxID),
+				logger.WithTeamID(sbx.Runtime.TeamID),
 				logger.WithExecutionID(sbx.Runtime.ExecutionID),
 			)
 		}

@@ -138,8 +138,7 @@ func (p *Publisher) OnInsert(ctx context.Context, sbx *sandbox.Sandbox) {
 	if err != nil {
 		p.publishCounter.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "error")))
 		logger.L().Error(ctx, "failed to publish sandbox routing record",
-			logger.WithSandboxID(sbx.Runtime.SandboxID),
-			logger.WithLifecycleID(sbx.LifecycleID),
+			logger.WithSandboxID(sbx.Runtime.SandboxID),				logger.WithTeamID(sbx.Runtime.TeamID),			logger.WithLifecycleID(sbx.LifecycleID),
 			zap.Error(err),
 		)
 
@@ -184,6 +183,7 @@ func (p *Publisher) OnStopping(ctx context.Context, sbx *sandbox.Sandbox) {
 		p.deleteCounter.Add(ctx, 1, metric.WithAttributes(attribute.String("result", "error")))
 		logger.L().Error(ctx, "failed to delete sandbox routing record; it expires via TTL",
 			logger.WithSandboxID(sbx.Runtime.SandboxID),
+			logger.WithTeamID(sbx.Runtime.TeamID),
 			logger.WithLifecycleID(sbx.LifecycleID),
 			zap.Error(err),
 		)

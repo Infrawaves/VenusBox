@@ -156,6 +156,7 @@ func (a *APIStore) connectSandbox(c *gin.Context, sandboxID api.SandboxID, timeo
 
 		logger.L().Info(ctx, "Sandbox not running, waiting for state change",
 			logger.WithSandboxID(sandboxID),
+			logger.WithTeamID(teamID.String()),
 			zap.String("state", string(notRunningErr.State)),
 			zap.Int("attempt", attempt+1),
 		)

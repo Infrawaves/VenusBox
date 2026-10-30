@@ -8,6 +8,8 @@ FROM --platform=$BUILDPLATFORM golang:${GOLANG_VERSION}-alpine${ALPINE_VERSION} 
 ENV GOPROXY=https://proxy.golang.org|https://proxy.golang.org:443|https://proxy.golang.org/|direct
 ARG TARGETARCH
 
+ENV GOSUMDB=sum.golang.org
+
 RUN apk add --no-cache git
 # A cross-compiled `go install` lands in /go/bin/linux_<arch>/, a native one in /go/bin/.
 RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/go/pkg/mod GOARCH=${TARGETARCH} go install github.com/pressly/goose/v3/cmd/goose@v3.28.0 \

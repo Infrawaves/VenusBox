@@ -7,6 +7,8 @@ FROM golang:${GOLANG_VERSION}-alpine${ALPINE_VERSION} AS builder
 # .github/actions/go-setup-cache/action.yml for the mechanism.
 ENV GOPROXY=https://proxy.golang.org|https://proxy.golang.org:443|https://proxy.golang.org/|direct
 
+ENV GOSUMDB=sum.golang.org
+
 WORKDIR /app
 
 # Copy go mod files

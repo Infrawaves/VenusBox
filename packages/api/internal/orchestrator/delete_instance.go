@@ -56,6 +56,7 @@ func (o *Orchestrator) RemoveSandbox(ctx context.Context, teamID uuid.UUID, sand
 			if errors.Is(err, sandbox.ErrNotFound) {
 				logger.L().Info(ctx, "Sandbox not found, already removed",
 					logger.WithSandboxID(sandboxID),
+					logger.WithTeamID(teamID.String()),
 					zap.String("kill_reason", opts.Reason.String()),
 				)
 
@@ -66,6 +67,7 @@ func (o *Orchestrator) RemoveSandbox(ctx context.Context, teamID uuid.UUID, sand
 			case sandbox.StateKilling:
 				logger.L().Info(ctx, "Sandbox is already killed",
 					logger.WithSandboxID(sandboxID),
+					logger.WithTeamID(teamID.String()),
 					zap.String("kill_reason", opts.Reason.String()),
 				)
 
@@ -74,6 +76,7 @@ func (o *Orchestrator) RemoveSandbox(ctx context.Context, teamID uuid.UUID, sand
 				logger.L().Error(ctx, "Error killing sandbox",
 					zap.Error(err),
 					logger.WithSandboxID(sandboxID),
+					logger.WithTeamID(teamID.String()),
 					zap.String("kill_reason", opts.Reason.String()),
 				)
 
@@ -81,14 +84,14 @@ func (o *Orchestrator) RemoveSandbox(ctx context.Context, teamID uuid.UUID, sand
 			}
 		case sandbox.StateActionPause:
 			if errors.Is(err, sandbox.ErrNotFound) {
-				logger.L().Info(ctx, "Sandbox not found for pause", logger.WithSandboxID(sandboxID))
+				logger.L().Info(ctx, "Sandbox not found for pause", logger.WithSandboxID(sandboxID), logger.WithTeamID(teamID.String()))
 
 				return ErrSandboxNotFound
 			}
 
 			if transErr, ok := errors.AsType[*sandbox.InvalidStateTransitionError](err); ok {
 				if transErr.CurrentState == sandbox.StateKilling {
-					logger.L().Info(ctx, "Sandbox is already killed", logger.WithSandboxID(sandboxID))
+					logger.L().Info(ctx, "Sandbox is already killed", logger.WithSandboxID(sandboxID), logger.WithTeamID(teamID.String()))
 
 					return ErrSandboxNotFound
 				}
@@ -104,11 +107,11 @@ func (o *Orchestrator) RemoveSandbox(ctx context.Context, teamID uuid.UUID, sand
 				return ErrExecutionChanged
 			}
 
-			logger.L().Error(ctx, "Error pausing sandbox", zap.Error(err), logger.WithSandboxID(sandboxID))
+			logger.L().Error(ctx, "Error pausing sandbox", zap.Error(err), logger.WithSandboxID(sandboxID), logger.WithTeamID(teamID.String()))
 
 			return ErrSandboxOperationFailed
 		default:
-			logger.L().Error(ctx, "Invalid state action", logger.WithSandboxID(sandboxID), zap.String("state_action", opts.Action.Name))
+			logger.L().Error(ctx, "Invalid state action", logger.WithSandboxID(sandboxID), logger.WithTeamID(teamID.String()), zap.String("state_action", opts.Action.Name))
 
 			return ErrSandboxOperationFailed
 		}
@@ -118,7 +121,7 @@ func (o *Orchestrator) RemoveSandbox(ctx context.Context, teamID uuid.UUID, sand
 	}()
 
 	if alreadyDone {
-		logger.L().Info(ctx, "Sandbox was already in the process of being removed", logger.WithSandboxID(sandboxID), zap.String("state", string(sbx.State)))
+		logger.L().Info(ctx, "Sandbox was already in the process of being removed", logger.WithSandboxID(sandboxID), logger.WithTeamID(teamID.String()), zap.String("state", string(sbx.State)))
 
 		if time.Since(sbx.EndTime) > sandbox.StaleCutoff && opts.Action.Effect == sandbox.TransitionExpires {
 			o.sandboxStore.Remove(context.WithoutCancel(ctx), teamID, sandboxID)
@@ -169,6 +172,7 @@ func (o *Orchestrator) RemoveSandbox(ctx context.Context, teamID uuid.UUID, sand
 
 			logger.L().Info(ctx, "Pause refused retryably by the node",
 				logger.WithSandboxID(sbx.SandboxID),
+				logger.WithTeamID(sbx.TeamID.String()),
 				zap.Bool("restored", preserveRecord),
 			)
 
@@ -188,6 +192,7 @@ func (o *Orchestrator) RemoveSandbox(ctx context.Context, teamID uuid.UUID, sand
 			zap.String("state_action", opts.Action.Name),
 			zap.Error(err),
 			logger.WithSandboxID(sbx.SandboxID),
+			logger.WithTeamID(sbx.TeamID.String()),
 		}
 		if opts.Action == sandbox.StateActionKill {
 			fields = append(fields, zap.String("kill_reason", opts.Reason.String()))
@@ -226,13 +231,13 @@ func (o *Orchestrator) killRefusedSandbox(ctx context.Context, sbx sandbox.Sandb
 	ctx = context.WithoutCancel(ctx)
 	node := o.getOrConnectNode(ctx, sbx.ClusterID, sbx.NodeID)
 	if node == nil {
-		logger.L().Error(ctx, "failed to get node to kill a refused sandbox after a failed restore", logger.WithNodeID(sbx.NodeID), logger.WithSandboxID(sbx.SandboxID))
+		logger.L().Error(ctx, "failed to get node to kill a refused sandbox after a failed restore", logger.WithNodeID(sbx.NodeID), logger.WithSandboxID(sbx.SandboxID), logger.WithTeamID(sbx.TeamID.String()))
 
 		return
 	}
 
 	if err := o.killSandboxOnNode(ctx, node, sbx.ToNodeSandbox(), sandbox.KillReasonOrphaned); err != nil {
-		logger.L().Error(ctx, "failed to kill a refused sandbox after a failed restore", zap.Error(err), logger.WithSandboxID(sbx.SandboxID))
+		logger.L().Error(ctx, "failed to kill a refused sandbox after a failed restore", zap.Error(err), logger.WithSandboxID(sbx.SandboxID), logger.WithTeamID(sbx.TeamID.String()))
 	}
 }
 
@@ -252,6 +257,7 @@ func (o *Orchestrator) restoreRefusedPause(ctx context.Context, transition sandb
 		logger.L().Error(ctx, "Failed to restore refused pause; falling back to removal",
 			zap.Error(err),
 			logger.WithSandboxID(sbx.SandboxID),
+			logger.WithTeamID(sbx.TeamID.String()),
 		)
 
 		return restoreOutcomeRestoreFailed
@@ -307,6 +313,7 @@ func (o *Orchestrator) removeSandboxFromNode(
 				killErr := o.killSandboxOnNode(ctx, node, sbx.ToNodeSandbox(), sandbox.KillReasonBaseTemplateMissing)
 				logger.L().Error(ctx, "Pause failed due to missing base template, killed sandbox as fallback",
 					logger.WithSandboxID(sbx.SandboxID),
+					logger.WithTeamID(sbx.TeamID.String()),
 					zap.String("base_template_id", sbx.BaseTemplateID),
 					zap.String("kill_reason", sandbox.KillReasonBaseTemplateMissing.String()),
 					zap.NamedError("pause_error", err),
@@ -332,6 +339,7 @@ func (o *Orchestrator) killOrphanSandbox(ctx context.Context, sbx sandbox.NodeSa
 	if node == nil {
 		logger.L().Error(ctx, "Node not found for orphan sandbox kill",
 			logger.WithSandboxID(sbx.SandboxID),
+			logger.WithTeamID(sbx.TeamID.String()),
 			logger.WithNodeID(sbx.NodeID),
 			zap.String("kill_reason", sandbox.KillReasonOrphaned.String()),
 		)
@@ -344,6 +352,7 @@ func (o *Orchestrator) killOrphanSandbox(ctx context.Context, sbx sandbox.NodeSa
 		logger.L().Error(ctx, "Failed to kill orphan sandbox on node",
 			zap.Error(err),
 			logger.WithSandboxID(sbx.SandboxID),
+			logger.WithTeamID(sbx.TeamID.String()),
 			logger.WithNodeID(sbx.NodeID),
 			zap.String("kill_reason", sandbox.KillReasonOrphaned.String()),
 		)
@@ -368,6 +377,7 @@ func (o *Orchestrator) killSandboxOnNode(
 	if ok && st.Code() == codes.NotFound {
 		logger.L().Info(ctx, "Sandbox not found during kill",
 			logger.WithSandboxID(sbx.SandboxID),
+			logger.WithTeamID(sbx.TeamID.String()),
 			logger.WithNodeID(node.ID),
 			zap.String("kill_reason", killReason),
 		)

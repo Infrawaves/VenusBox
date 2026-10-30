@@ -96,7 +96,7 @@ func (a *APIStore) PostSandboxesSandboxIDResume(c *gin.Context, sandboxID api.Sa
 
 		switch sandboxData.State {
 		case sandbox.StatePausing:
-			logger.L().Debug(ctx, "Waiting for sandbox to pause", logger.WithSandboxID(sandboxID))
+				logger.L().Debug(ctx, "Waiting for sandbox to pause", logger.WithSandboxID(sandboxID), logger.WithTeamID(teamID.String()))
 			err = backend.WaitForStateChange(ctx, teamID, sandboxID)
 			if errors.Is(err, sandbox.ErrTransitionRestored) {
 				a.sendAPIStoreError(c, http.StatusConflict, fmt.Sprintf("Sandbox %s is already running", sandboxID))
@@ -120,7 +120,7 @@ func (a *APIStore) PostSandboxesSandboxIDResume(c *gin.Context, sandboxID api.Sa
 				return
 			}
 		case sandbox.StateKilling:
-			logger.L().Debug(ctx, "Sandbox is being killed, cannot resume", logger.WithSandboxID(sandboxID))
+				logger.L().Debug(ctx, "Sandbox is being killed, cannot resume", logger.WithSandboxID(sandboxID), logger.WithTeamID(teamID.String()))
 			a.sendAPIStoreError(c, http.StatusNotFound, utils.SandboxNotFoundMsg(sandboxID))
 
 			return
@@ -133,6 +133,7 @@ func (a *APIStore) PostSandboxesSandboxIDResume(c *gin.Context, sandboxID api.Sa
 
 			logger.L().Debug(ctx, "Sandbox is already running",
 				logger.WithSandboxID(sandboxID),
+				logger.WithTeamID(teamID.String()),
 				logger.Time("end_time", sandboxData.EndTime),
 				logger.Time("start_time", sandboxData.StartTime),
 				zap.String("node_id", sandboxData.NodeID),
@@ -154,7 +155,7 @@ func (a *APIStore) PostSandboxesSandboxIDResume(c *gin.Context, sandboxID api.Sa
 	lastSnapshot, err := a.snapshotCache.Get(ctx, sandboxID)
 	if err != nil {
 		if errors.Is(err, snapshotcache.ErrSnapshotNotFound) {
-			logger.L().Debug(ctx, "Snapshot not found", logger.WithSandboxID(sandboxID))
+				logger.L().Debug(ctx, "Snapshot not found", logger.WithSandboxID(sandboxID), logger.WithTeamID(teamID.String()))
 			a.sendAPIStoreError(c, http.StatusNotFound, utils.SandboxNotFoundMsg(sandboxID))
 
 			return

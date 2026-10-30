@@ -205,7 +205,7 @@ func (so *SandboxObserver) startObserving() (metric.Registration, error) {
 			for _, sbx := range so.sandboxes.Items() {
 				ok, err := utils.IsGTEVersion(sbx.Config.Envd.Version, minEnvdVersionForMetrics)
 				if err != nil {
-					logger.L().Error(ctx, "Failed to check envd version", zap.Error(err), logger.WithSandboxID(sbx.Runtime.SandboxID))
+					logger.L().Error(ctx, "Failed to check envd version", zap.Error(err), logger.WithSandboxID(sbx.Runtime.SandboxID), logger.WithTeamID(sbx.Runtime.TeamID))
 
 					continue
 				}
@@ -229,7 +229,7 @@ func (so *SandboxObserver) startObserving() (metric.Registration, error) {
 
 					ok, err = utils.IsGTEVersion(sbx.Config.Envd.Version, minEnvVersionForMetricsTimestamp)
 					if err != nil {
-						logger.L().Error(ctx, "Failed to check envd version for timestamp in metrics", zap.Error(err), logger.WithSandboxID(sbx.Runtime.SandboxID))
+						logger.L().Error(ctx, "Failed to check envd version for timestamp in metrics", zap.Error(err), logger.WithSandboxID(sbx.Runtime.SandboxID), logger.WithTeamID(sbx.Runtime.TeamID))
 					}
 
 					// Check if sandbox clock are in acceptable drift from orchestrator host clock
@@ -276,7 +276,7 @@ func (so *SandboxObserver) startObserving() (metric.Registration, error) {
 
 					memoryTotal, memoryUsed, memoryReported, err := sandboxMemory(sbx.Config.Envd.Version, sbxMetrics)
 					if err != nil {
-						logger.L().Error(ctx, "Failed to check envd version for memory metrics", zap.Error(err), logger.WithSandboxID(sbx.Runtime.SandboxID))
+						logger.L().Error(ctx, "Failed to check envd version for memory metrics", zap.Error(err), logger.WithSandboxID(sbx.Runtime.SandboxID), logger.WithTeamID(sbx.Runtime.TeamID))
 					}
 					if memoryReported {
 						o.ObserveInt64(so.memoryTotal, memoryTotal, attributes)
@@ -285,7 +285,7 @@ func (so *SandboxObserver) startObserving() (metric.Registration, error) {
 
 					ok, err := utils.IsGTEVersion(sbx.Config.Envd.Version, minEnvdVersionForCacheMetrics)
 					if err != nil {
-						logger.L().Error(ctx, "Failed to check envd version for cache metrics", zap.Error(err), logger.WithSandboxID(sbx.Runtime.SandboxID))
+						logger.L().Error(ctx, "Failed to check envd version for cache metrics", zap.Error(err), logger.WithSandboxID(sbx.Runtime.SandboxID), logger.WithTeamID(sbx.Runtime.TeamID))
 					}
 					if ok {
 						o.ObserveInt64(so.memoryCache, sbxMetrics.MemCache, attributes)
@@ -293,7 +293,7 @@ func (so *SandboxObserver) startObserving() (metric.Registration, error) {
 
 					ok, err = utils.IsGTEVersion(sbx.Config.Envd.Version, minEnvdVersionForDiskMetrics)
 					if err != nil {
-						logger.L().Error(ctx, "Failed to check envd version for disk metrics", zap.Error(err), logger.WithSandboxID(sbx.Runtime.SandboxID))
+						logger.L().Error(ctx, "Failed to check envd version for disk metrics", zap.Error(err), logger.WithSandboxID(sbx.Runtime.SandboxID), logger.WithTeamID(sbx.Runtime.TeamID))
 					}
 					if ok {
 						o.ObserveInt64(so.diskTotal, sbxMetrics.DiskTotal, attributes)

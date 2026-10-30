@@ -254,7 +254,7 @@ func pauseHandleNotRunningSandbox(ctx context.Context, cache *snapshotcache.Snap
 			}
 		}
 
-		logger.L().Warn(ctx, "Sandbox is already paused", logger.WithSandboxID(sandboxID))
+		logger.L().Warn(ctx, "Sandbox is already paused", logger.WithSandboxID(sandboxID), logger.WithTeamID(teamID.String()))
 
 		return api.APIError{
 			Code:      http.StatusConflict,
@@ -263,7 +263,7 @@ func pauseHandleNotRunningSandbox(ctx context.Context, cache *snapshotcache.Snap
 	}
 
 	if errors.Is(err, snapshotcache.ErrSnapshotNotFound) {
-		logger.L().Debug(ctx, "Snapshot not found", logger.WithSandboxID(sandboxID))
+logger.L().Debug(ctx, "Snapshot not found", logger.WithSandboxID(sandboxID), logger.WithTeamID(teamID.String()))
 
 		return api.APIError{
 			Code:      http.StatusNotFound,
@@ -271,7 +271,7 @@ func pauseHandleNotRunningSandbox(ctx context.Context, cache *snapshotcache.Snap
 		}
 	}
 
-	logger.L().Error(ctx, "Error getting snapshot", zap.Error(err), logger.WithSandboxID(sandboxID))
+	logger.L().Error(ctx, "Error getting snapshot", zap.Error(err), logger.WithSandboxID(sandboxID), logger.WithTeamID(teamID.String()))
 
 	return api.APIError{
 		Code:      http.StatusInternalServerError,

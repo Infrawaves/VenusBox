@@ -46,6 +46,7 @@ func (o *Orchestrator) pauseSandbox(ctx context.Context, node *nodemanager.Node,
 	originNodeCPU := node.MachineInfo()
 	logger.L().Info(ctx, "Snapshotting sandbox",
 		logger.WithSandboxID(sbx.SandboxID),
+		logger.WithTeamID(sbx.TeamID.String()),
 		zap.String("origin_node_id", node.ID),
 		zap.String("origin_node_cpu_architecture", originNodeCPU.CPUArchitecture),
 		zap.String("origin_node_cpu_family", originNodeCPU.CPUFamily),
@@ -108,7 +109,7 @@ func snapshotInstance(ctx context.Context, node *nodemanager.Node, sbx sandbox.S
 	}
 
 	if st.Code() == codes.ResourceExhausted {
-		logger.L().Warn(ctx, "Pause refused by the node", logger.WithSandboxID(sbx.SandboxID), zap.String("node_message", st.Message()))
+		logger.L().Warn(ctx, "Pause refused by the node", logger.WithSandboxID(sbx.SandboxID), logger.WithTeamID(sbx.TeamID.String()), zap.String("node_message", st.Message()))
 
 		return PauseQueueExhaustedError{}
 	}

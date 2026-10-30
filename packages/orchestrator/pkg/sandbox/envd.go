@@ -870,6 +870,7 @@ func (s *Sandbox) initEnvd(ctx context.Context, startType StartType, recordMetri
 	}
 	if err != nil {
 		s.log().Error(ctx, "failed to init envd after retries",
+			logger.WithTeamID(s.Runtime.TeamID),
 			logger.WithEnvdVersion(s.Config.Envd.Version),
 			zap.Int64("timeout_ms", s.internalConfig.EnvdInitRequestTimeout.Milliseconds()),
 			zap.String("loop", string(loop)),
@@ -889,6 +890,7 @@ func (s *Sandbox) initEnvd(ctx context.Context, startType StartType, recordMetri
 	if response.StatusCode != http.StatusNoContent {
 		body := envdErrorBody(response.Body)
 		s.log().Error(ctx, "envd init request failed",
+			logger.WithTeamID(s.Runtime.TeamID),
 			logger.WithEnvdVersion(s.Config.Envd.Version),
 			zap.Int("status_code", response.StatusCode),
 			zap.String("response_body", body),

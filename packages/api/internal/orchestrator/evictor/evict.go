@@ -245,6 +245,7 @@ func (e *Evictor) evictSandbox(ctx context.Context, sbx sandbox.Sandbox) {
 	if action != sandbox.StateActionPause {
 		logger.L().Debug(ctx, "Sandbox evicted",
 			logger.WithSandboxID(sbx.SandboxID),
+			logger.WithTeamID(sbx.TeamID.String()),
 			zap.String("kill_reason", sandbox.KillReasonTimeout.String()),
 		)
 	}

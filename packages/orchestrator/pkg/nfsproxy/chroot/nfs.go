@@ -135,8 +135,7 @@ func (h *NFSHandler) OnNetworkRelease(ctx context.Context, sbx *sandbox.Sandbox)
 		err := chroot.Close()
 		if err != nil {
 			logger.L().Warn(ctx, "failed to close chroot",
-				logger.WithSandboxID(sbx.Runtime.SandboxID),
-				logger.WithLifecycleID(lifecycleID),
+				logger.WithSandboxID(sbx.Runtime.SandboxID),					logger.WithTeamID(sbx.Runtime.TeamID),				logger.WithLifecycleID(lifecycleID),
 				zap.String("path", chroot.Root()),
 				zap.Error(err),
 			)

@@ -107,7 +107,7 @@ func (o *Orchestrator) CheckpointSandbox(ctx context.Context, teamID uuid.UUID, 
 
 				return fmt.Errorf("checkpoint rejected: %w", err)
 			case codes.ResourceExhausted:
-				logger.L().Warn(ctx, "Checkpoint refused by the node", logger.WithSandboxID(sandboxID), zap.String("node_message", st.Message()))
+				logger.L().Warn(ctx, "Checkpoint refused by the node", logger.WithSandboxID(sandboxID), logger.WithTeamID(teamID.String()), zap.String("node_message", st.Message()))
 				finish(nil)
 
 				return PauseQueueExhaustedError{}

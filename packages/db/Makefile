@@ -7,6 +7,11 @@ goose := GOOSE_DRIVER=postgres GOOSE_DBSTRING=$(POSTGRES_CONNECTION_STRING) go t
 # The migrator applies River's migrations after goose's; the goose CLI cannot.
 migrator := go run ./scripts/migrator.go
 
+# Volcengine configuration
+VOLC_REGISTRY ?= bp-dockerhub-relay-cn-hongkong.cr.volces.com
+VOLC_NAMESPACE ?= e2b
+VOLC_IMAGE_PREFIX := $(VOLC_REGISTRY)/$(VOLC_NAMESPACE)
+IMAGE_TAG ?= 2026.30
 
 .PHONY: migrate
 migrate:
@@ -58,6 +63,13 @@ build-tools:
 .PHONY: test
 test: build-tools
 	go test -v ./tests/...
+
+.PHONY: build-and-upload
+build-and-upload:
+	@echo "Building and pushing to Volcengine: $(VOLC_IMAGE_PREFIX)/db-migrator:$(IMAGE_TAG)"
+	@docker build --tag "$(VOLC_IMAGE_PREFIX)/db-migrator:$(IMAGE_TAG)" -f ./Dockerfile ..
+	@echo "Pushing image to Volcengine..."
+	@docker push "$(VOLC_IMAGE_PREFIX)/db-migrator:$(IMAGE_TAG)"
 
 .PHONY: seed-db
 seed-db:

@@ -109,6 +109,7 @@ func (lb *LayerExecutor) BuildLayer(
 				ctx,
 				"removed proxy from pool",
 				logger.WithSandboxID(sbx.Runtime.SandboxID),
+				logger.WithTeamID(sbx.Runtime.TeamID),
 				logger.WithExecutionID(sbx.Runtime.ExecutionID),
 			)
 		}
@@ -122,6 +123,7 @@ func (lb *LayerExecutor) BuildLayer(
 				ctx,
 				"error updating envd",
 				logger.WithSandboxID(sbx.Runtime.SandboxID),
+				logger.WithTeamID(sbx.Runtime.TeamID),
 				logger.WithExecutionID(sbx.Runtime.ExecutionID),
 				zap.Error(err),
 			)
@@ -137,6 +139,7 @@ func (lb *LayerExecutor) BuildLayer(
 			ctx,
 			"error executing action",
 			logger.WithSandboxID(sbx.Runtime.SandboxID),
+			logger.WithTeamID(sbx.Runtime.TeamID),
 			logger.WithExecutionID(sbx.Runtime.ExecutionID),
 			zap.Error(err),
 		)
@@ -248,6 +251,7 @@ fi`,
 		ctx,
 		"removed proxy from pool after restarting envd",
 		logger.WithSandboxID(sbx.Runtime.SandboxID),
+		logger.WithTeamID(sbx.Runtime.TeamID),
 		logger.WithExecutionID(sbx.Runtime.ExecutionID),
 	)
 
