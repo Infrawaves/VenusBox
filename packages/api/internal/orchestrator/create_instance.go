@@ -548,7 +548,8 @@ func (o *Orchestrator) CreateSandbox(
 	requirements := placement.Requirements{
 		CPU: cpuRequirement,
 		Memory: placement.MemoryRequirement{
-			Limit: float64(o.featureFlagsClient.IntFlag(ctx, featureflags.PlacementHugepageLimitPercent, featureflags.TeamContext(team.ID.String()), featureflags.SandboxContext(sandboxID))) / 100,
+			Limit:    float64(o.featureFlagsClient.IntFlag(ctx, featureflags.PlacementHugepageLimitPercent, featureflags.TeamContext(team.ID.String()), featureflags.SandboxContext(sandboxID))) / 100,
+			Estimate: float64(o.featureFlagsClient.IntFlag(ctx, featureflags.PlacementHugepageEstimatePercent, featureflags.TeamContext(team.ID.String()), featureflags.SandboxContext(sandboxID))) / 100,
 		},
 	}
 

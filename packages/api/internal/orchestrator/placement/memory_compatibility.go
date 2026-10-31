@@ -1,6 +1,8 @@
 package placement
 
 import (
+	"math"
+
 	"github.com/e2b-dev/infra/packages/api/internal/orchestrator/nodemanager"
 )
 
@@ -10,6 +12,20 @@ type MemoryRequirement struct {
 	// Limit is the share of the pool ceiling committed pages may reach; 0 turns
 	// the check off.
 	Limit float64
+	// Estimate is the share of a hugepage sandbox's RAM placement books for it
+	// until the node reports again. Outside (0, 1) the full RAM is booked.
+	Estimate float64
+}
+
+// hugePagesEstimateMiB is the MiB placement books for a sandbox of ramMiB
+// under estimate, rounded up so a positive RAM never books nothing; 0 when
+// the full RAM is booked.
+func hugePagesEstimateMiB(ramMiB int64, estimate float64) int64 {
+	if ramMiB <= 0 || estimate <= 0 || estimate >= 1 {
+		return 0
+	}
+
+	return max(1, int64(math.Ceil(float64(ramMiB)*estimate)))
 }
 
 // NodeSatisfiesMemory reports whether node can take resources with its
@@ -42,13 +58,13 @@ func MemoryAdmission(node *nodemanager.Node, resources nodemanager.SandboxResour
 	var pendingMiB int64
 	for _, res := range inFlight {
 		if res.HugePages {
-			pendingMiB += res.MiBMemory
+			pendingMiB += res.HugePagesMiB()
 		}
 	}
 
 	committed := metrics.HugePagesUsed + metrics.HugePagesReserved +
 		nodemanager.HugePagesFor(pendingMiB, metrics.HugePageSizeBytes) +
-		nodemanager.HugePagesFor(resources.MiBMemory, metrics.HugePageSizeBytes)
+		nodemanager.HugePagesFor(resources.HugePagesMiB(), metrics.HugePageSizeBytes)
 
 	return float64(committed) <= memory.Limit*float64(metrics.HugePagesCapacity), ""
 }

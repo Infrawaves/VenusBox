@@ -549,10 +549,19 @@ func envdTimeoutFallbackMs() int {
 	return int(d.Milliseconds())
 }
 
-func hugePagesMaxUsagePercentageFallback() int {
-	v, err := env.GetEnvAsInt("HUGEPAGES_MAX_USAGE_PERCENTAGE", 75)
+func placementHugepageEstimatePercentFallback() int {
+	v, err := env.GetEnvAsInt("PLACEMENT_HUGEPAGE_ESTIMATE_PERCENT", 10)
 	if err != nil {
-		return 75
+		return 10
+	}
+
+	return v
+}
+
+func hugePagesMaxUsagePercentageFallback() int {
+	v, err := env.GetEnvAsInt("HUGEPAGES_MAX_USAGE_PERCENTAGE", 70)
+	if err != nil {
+		return 70
 	}
 
 	return v
@@ -660,6 +669,16 @@ var (
 	// in further pages: exhausting the pool SIGBUSes the faulting VM. Non-positive
 	// disables the check. Falls back to the HUGEPAGES_MAX_USAGE_PERCENTAGE env var.
 	HugePagesMaxUsagePercentage = NewIntFlag("hugepages-max-usage-percentage", hugePagesMaxUsagePercentageFallback())
+
+	// PlacementHugepageEstimatePercent is the share of a hugepage sandbox's RAM
+	// placement books against the node until its next report (NODE_SYNC_INTERVAL)
+	// replaces the estimate with the kernel counters. The default of 10 suits
+	// orchestrators that map guest memory with MAP_NORESERVE, so only touched
+	// pages count: a freshly resumed guest touches a few percent of its RAM.
+	// Raise it to 100 (book the full RAM) for any orchestrator that reserves
+	// guest memory up front, or a burst is admitted past the pool. Outside 1-99
+	// reads as 100. Falls back to the PLACEMENT_HUGEPAGE_ESTIMATE_PERCENT env var.
+	PlacementHugepageEstimatePercent = NewIntFlag("placement-hugepage-estimate-percent", placementHugepageEstimatePercentFallback())
 
 	// BuildCacheMaxUsagePercentage the maximum percentage of the cache disk storage
 	// that can be used before the cache starts evicting items.

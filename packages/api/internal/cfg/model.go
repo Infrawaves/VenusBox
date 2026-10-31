@@ -177,6 +177,14 @@ type Config struct {
 	// 0.5, so clusters without a pool should set this false and rank on CPU.
 	BestOfKHugepageMemory bool `env:"BEST_OF_K_HUGEPAGE_MEMORY" envDefault:"true"`
 
+	// NodeSyncInterval is how often the API re-reads every orchestrator's
+	// metrics and sandbox list. Between two reads placement books new
+	// sandboxes from its own estimate, so a shorter interval bounds how long
+	// that estimate stands; each read costs two RPCs per node per API replica.
+	// A non-positive value reads as 20s. Each sync stays bounded by 20s
+	// whatever the interval, so a slow node is not cut short.
+	NodeSyncInterval time.Duration `env:"NODE_SYNC_INTERVAL" envDefault:"5s"`
+
 	// OutboxMaxWorkers is how many River outbox jobs one API replica works at
 	// once.
 	OutboxMaxWorkers int `env:"OUTBOX_MAX_WORKERS" envDefault:"10"`

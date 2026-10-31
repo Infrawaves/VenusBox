@@ -64,6 +64,18 @@ func TestNode_OptimisticAdd_ReservesHugePages(t *testing.T) {
 	assert.Equal(t, uint64(512), node.Metrics().HugePagesReserved)
 }
 
+// A placement estimate books its share of the RAM, not the full RAM.
+func TestNode_OptimisticAdd_ReservesTheHugePageEstimate(t *testing.T) {
+	t.Parallel()
+
+	pageBytes := uint64(units.MBToBytes(2))
+	node := NewTestNode("test-node", api.NodeStatusReady, 0, 4, WithHugePages(1000, 0, 0, pageBytes))
+
+	node.OptimisticAdd(SandboxResources{CPUs: 2, MiBMemory: 1024, HugePages: true, HugePagesEstimateMiB: 128})
+
+	assert.Equal(t, uint64(64), node.Metrics().HugePagesReserved)
+}
+
 func TestNode_OptimisticAdd_OrdinaryPagesLeaveThePoolAlone(t *testing.T) {
 	t.Parallel()
 

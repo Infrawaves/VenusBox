@@ -19,8 +19,19 @@ import (
 
 var tracer = otel.Tracer("github.com/e2b-dev/infra/packages/api/internal/orchestrator")
 
-// cacheSyncTime is the time to sync the cache with the actual instances in Orchestrator.
+// cacheSyncTime bounds one sync of the cache with the actual instances in
+// Orchestrator, and is the interval when none is configured.
 const cacheSyncTime = 20 * time.Second
+
+// nodeSyncInterval is how often keepInSync runs: the configured interval, or
+// cacheSyncTime when it is not positive.
+func nodeSyncInterval(configured time.Duration) time.Duration {
+	if configured <= 0 {
+		return cacheSyncTime
+	}
+
+	return configured
+}
 
 const nodeConnectTimeout = 5 * time.Second
 
@@ -34,8 +45,9 @@ func (o *Orchestrator) keepInSync(ctx context.Context, store *sandbox.Store, ski
 	logger.L().Info(ctx, "Running the initial node sync")
 	o.syncNodes(ctx, store, skipSyncingWithNomad)
 
-	// Sync the nodes every cacheSyncTime
-	ticker := time.NewTicker(cacheSyncTime)
+	// Sync the nodes every interval. A sync running past it delays the next
+	// tick rather than overlapping it.
+	ticker := time.NewTicker(nodeSyncInterval(o.nodeSyncInterval))
 	defer ticker.Stop()
 
 	for {

@@ -239,3 +239,36 @@ func TestPlaceSandbox_ConcurrentPlacementsNeverOverfillANode(t *testing.T) {
 		require.LessOrEqual(t, placed.Load(), int32(3))
 	}
 }
+
+// Between two node reports placement books each sandbox at the estimate, so a
+// burst fills the pool by the estimate rather than by the full RAM.
+func TestPlaceSandbox_EstimateLetsABurstFitMoreBetweenReports(t *testing.T) {
+	t.Parallel()
+
+	placeUntilFull := func(t *testing.T, memory MemoryRequirement) int {
+		t.Helper()
+
+		// 768 pages hold three 512 MiB sandboxes at full RAM.
+		node := hugepageNode("node", 1600, 0, 0, 768)
+		placed := 0
+		for i := range 100 {
+			req := hugepageSbxRequest()
+			req.Sandbox.SandboxId = fmt.Sprintf("sbx-%d", i)
+			var picks []string
+			_, err := PlaceSandbox(t.Context(), firstNotExcluded([]*nodemanager.Node{node}, &picks), []*nodemanager.Node{node}, node,
+				req, Requirements{Memory: memory}, false, nil)
+			if err != nil {
+				require.ErrorAs(t, err, &NoNodesAvailableError{})
+
+				return placed
+			}
+			placed++
+		}
+
+		return placed
+	}
+
+	assert.Equal(t, 3, placeUntilFull(t, MemoryRequirement{Limit: 1}))
+	// 25% of 512 MiB is 64 pages: twelve fit in 768.
+	assert.Equal(t, 12, placeUntilFull(t, MemoryRequirement{Limit: 1, Estimate: 0.25}))
+}

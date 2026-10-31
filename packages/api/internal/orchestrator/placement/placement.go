@@ -117,9 +117,10 @@ func placeSandbox(
 	var err error
 
 	resources := nodemanager.SandboxResources{
-		CPUs:      sbxRequest.GetSandbox().GetVcpu(),
-		MiBMemory: sbxRequest.GetSandbox().GetRamMb(),
-		HugePages: sbxRequest.GetSandbox().GetHugePages(),
+		CPUs:                 sbxRequest.GetSandbox().GetVcpu(),
+		MiBMemory:            sbxRequest.GetSandbox().GetRamMb(),
+		HugePages:            sbxRequest.GetSandbox().GetHugePages(),
+		HugePagesEstimateMiB: hugePagesEstimateMiB(sbxRequest.GetSandbox().GetRamMb(), requirements.Memory.Estimate),
 	}
 
 	var node *nodemanager.Node

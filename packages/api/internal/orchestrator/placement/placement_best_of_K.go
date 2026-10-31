@@ -34,7 +34,7 @@ func DefaultBestOfKConfig() BestOfKConfig {
 		K:                           3,
 		Alpha:                       0.5,
 		ScoreHugepages:              true,
-		HugePagesMaxUsagePercentage: 75,
+		HugePagesMaxUsagePercentage: 70,
 	}
 }
 
@@ -50,7 +50,7 @@ func (b *BestOfK) Score(node *nodemanager.Node, resources nodemanager.SandboxRes
 	for _, res := range node.PlacementMetrics.InProgress() {
 		pendingCPUs += res.CPUs
 		if res.HugePages {
-			pendingMiB += res.MiBMemory
+			pendingMiB += res.HugePagesMiB()
 		}
 	}
 
@@ -92,7 +92,7 @@ func memoryScore(metrics nodemanager.Metrics, resources nodemanager.SandboxResou
 		return 0.5
 	}
 
-	requested := float64(units.MBToBytes(resources.MiBMemory))
+	requested := float64(units.MBToBytes(resources.HugePagesMiB()))
 	committed := float64(metrics.HugePagesUsed+metrics.HugePagesReserved)*pageBytes + float64(units.MBToBytes(pendingMiB))
 	used := float64(metrics.HugePagesUsed) * pageBytes
 

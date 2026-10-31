@@ -195,7 +195,13 @@ delivery or cache refresh is pending.
   of the node's pool ceiling (base pool plus overcommit allowance, reported by
   the orchestrator); within an API replica the check and the in-flight record
   are one step per node, and when the compatible nodes are all full placement
-  answers with a capacity error, not "no compatible node". With the
+  answers with a capacity error, not "no compatible node". Until a node's next
+  report (the API re-reads every node each `NODE_SYNC_INTERVAL`, 5s by default; each
+  read is bounded by 20s) a placed or in-flight hugepage sandbox is booked against it at
+  `placement-hugepage-estimate-percent` of its RAM (default 10,
+  `PLACEMENT_HUGEPAGE_ESTIMATE_PERCENT` without LaunchDarkly), which suits
+  orchestrators that map guest memory with `MAP_NORESERVE`; set it to 100 where an
+  orchestrator reserves guest memory up front, or a burst is admitted past the pool. With the
   orchestrator's `create-memory-refusal` flag on (`CREATE_MEMORY_REFUSAL` for a
   deployment without LaunchDarkly), a create whose guest memory the pool
   cannot back while a sandbox on that node is still tearing down is refused
@@ -203,7 +209,7 @@ delivery or cache refresh is pending.
   back; with nothing tearing down it fails at once and says why. Off, it fails
   as an internal error and the node is excluded. Independently, any node whose hugepage pool
   (used + reserved, over `HugePages_Total`) is at or above `hugepages-max-usage-percentage`
-  (default 75%, `HUGEPAGES_MAX_USAGE_PERCENTAGE` without LaunchDarkly; 0 disables) is skipped,
+  (default 70%, `HUGEPAGES_MAX_USAGE_PERCENTAGE` without LaunchDarkly; 0 disables) is skipped,
   leaving the rest of the pool for running sandboxes to fault into; the orchestrator re-checks
   its own pool on `Create` and answers `ResourceExhausted`.
 - **State**: writes sandbox records to Redis (source of truth for *running* sandboxes). It does

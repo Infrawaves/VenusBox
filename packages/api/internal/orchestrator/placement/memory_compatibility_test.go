@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/e2b-dev/infra/packages/api/internal/api"
 	"github.com/e2b-dev/infra/packages/api/internal/orchestrator/nodemanager"
@@ -131,4 +132,55 @@ func TestMemoryAdmission_NamesWhyANodePassedUnbounded(t *testing.T) {
 	ok, missing = MemoryAdmission(hugepageNode("n", 1000, 900, 100, 0), hugepageSandbox, MemoryRequirement{})
 	assert.True(t, ok)
 	assert.Empty(t, missing)
+}
+
+func TestHugePagesEstimateMiB(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		ramMiB   int64
+		estimate float64
+		want     int64
+	}{
+		{name: "full RAM when unset", ramMiB: 16384, estimate: 0, want: 0},
+		{name: "full RAM at 100%", ramMiB: 16384, estimate: 1, want: 0},
+		{name: "full RAM past 100%", ramMiB: 16384, estimate: 1.5, want: 0},
+		{name: "full RAM when negative", ramMiB: 16384, estimate: -0.2, want: 0},
+		{name: "share of the RAM", ramMiB: 16384, estimate: 0.15, want: 2458},
+		{name: "rounds up", ramMiB: 3, estimate: 0.5, want: 2},
+		{name: "never books nothing", ramMiB: 1, estimate: 0.01, want: 1},
+		{name: "no RAM", ramMiB: 0, estimate: 0.5, want: 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tt.want, hugePagesEstimateMiB(tt.ramMiB, tt.estimate))
+		})
+	}
+}
+
+// The limit counts the estimate for the requested and the in-flight
+// sandboxes, so a node fits more of them than its pool holds at full RAM.
+func TestNodeSatisfiesMemory_CountsTheEstimate(t *testing.T) {
+	t.Parallel()
+
+	estimated := hugepageSandbox
+	estimated.HugePagesEstimateMiB = 128 // 64 pages
+
+	// 1700 committed + 64 requested <= 0.95 * 2000; 256 requested would not fit.
+	node := hugepageNode("n", 1600, 1600, 100, 2000)
+	assert.True(t, NodeSatisfiesMemory(node, estimated, limit95))
+	assert.False(t, NodeSatisfiesMemory(node, hugepageSandbox, limit95))
+
+	// An estimated placement in flight counts as its 64 pages: 1700 + 64 + 64 <= 1900.
+	require.True(t, node.PlacementMetrics.StartPlacingIf("in-flight", estimated, func() bool { return true }))
+	assert.True(t, NodeSatisfiesMemory(node, estimated, limit95))
+
+	// A full-RAM placement in flight still counts as its 256 pages: 1700 + 256 + 64 > 1900.
+	full := hugepageNode("full", 1600, 1600, 100, 2000)
+	require.True(t, full.PlacementMetrics.StartPlacingIf("in-flight", hugepageSandbox, func() bool { return true }))
+	assert.False(t, NodeSatisfiesMemory(full, estimated, limit95))
 }

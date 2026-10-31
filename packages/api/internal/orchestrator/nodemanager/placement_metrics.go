@@ -13,6 +13,22 @@ type SandboxResources struct {
 	// HugePages reports whether the sandbox's RAM comes from the node's
 	// hugepage pool rather than ordinary pages.
 	HugePages bool
+	// HugePagesEstimateMiB is how much of the pool placement books for this
+	// sandbox until the node's next report replaces the estimate. 0 books the
+	// full RAM. A node mapping guest memory with MAP_NORESERVE commits only the
+	// pages a guest touches, so booking the full RAM would cap a burst at the
+	// pool divided by the declared RAM per sync interval.
+	HugePagesEstimateMiB int64
+}
+
+// HugePagesMiB is the hugepage commitment placement books for the sandbox:
+// the estimate when set, the full RAM otherwise.
+func (r SandboxResources) HugePagesMiB() int64 {
+	if r.HugePagesEstimateMiB > 0 {
+		return r.HugePagesEstimateMiB
+	}
+
+	return r.MiBMemory
 }
 
 type PlacementMetrics struct {

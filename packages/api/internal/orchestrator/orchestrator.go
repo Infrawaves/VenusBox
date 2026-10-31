@@ -93,6 +93,8 @@ type Orchestrator struct {
 	drainMu         sync.RWMutex
 	draining        bool
 	scoreHugepages  bool
+	// nodeSyncInterval is how often keepInSync re-reads every node.
+	nodeSyncInterval time.Duration
 
 	// localClusterOwnsOrchestrators makes connectToClusterNode register
 	// local-cluster instances that report the Orchestrator role as nodes.
@@ -195,6 +197,7 @@ func New(
 		nodes:                smap.New[*nodemanager.Node](),
 		placementAlgorithm:   bestOfKAlgorithm,
 		scoreHugepages:       config.BestOfKHugepageMemory,
+		nodeSyncInterval:     config.NodeSyncInterval,
 		featureFlagsClient:   featureFlags,
 		accessTokenGenerator: accessTokenGenerator,
 		sqlcDB:               sqlcDB,

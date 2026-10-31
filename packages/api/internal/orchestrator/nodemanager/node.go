@@ -231,7 +231,7 @@ func (n *Node) OptimisticAdd(res SandboxResources) {
 	n.metrics.CpuAllocated += uint32(res.CPUs)
 	n.metrics.MemoryAllocatedBytes += uint64(res.MiBMemory) * 1024 * 1024 // Note: CpuPercent is difficult to estimate, usually just updating Allocated is sufficient for the scheduling algorithm
 	if res.HugePages {
-		n.metrics.HugePagesReserved += HugePagesFor(res.MiBMemory, n.metrics.HugePageSizeBytes)
+		n.metrics.HugePagesReserved += HugePagesFor(res.HugePagesMiB(), n.metrics.HugePageSizeBytes)
 		n.lastHugePageAdd = time.Now()
 	}
 }
