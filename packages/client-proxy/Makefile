@@ -10,7 +10,7 @@ $(if $(HOSTNAME),,$(error Failed to determine hostname: both 'hostname' and 'hos
 VOLC_REGISTRY ?= bp-dockerhub-relay-cn-hongkong.cr.volces.com
 VOLC_NAMESPACE ?= e2b
 VOLC_IMAGE_PREFIX := $(VOLC_REGISTRY)/$(VOLC_NAMESPACE)
-IMAGE_TAG ?= 2026.30
+IMAGE_TAG ?= 2026.30.hugepage
 
 # E2B-hosted registry that holds released, prebuilt client-proxy images.
 # Published to by the release-please workflow on tagging a release.

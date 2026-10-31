@@ -15,7 +15,7 @@ expectedMigration := $(shell ls ../db/migrations | sed 's/_.*//' | sort | tail -
 VOLC_REGISTRY ?= bp-dockerhub-relay-cn-hongkong.cr.volces.com
 VOLC_NAMESPACE ?= e2b
 VOLC_IMAGE_PREFIX := $(VOLC_REGISTRY)/$(VOLC_NAMESPACE)
-IMAGE_TAG ?= 2026.30
+IMAGE_TAG ?= 2026.30.hugepage
 
 # E2B-hosted registry repo holding released, prebuilt api AND db-migrator
 # images — they release as one unit from this package's docker-bake.hcl.

@@ -11,7 +11,7 @@ migrator := go run ./scripts/migrator.go
 VOLC_REGISTRY ?= bp-dockerhub-relay-cn-hongkong.cr.volces.com
 VOLC_NAMESPACE ?= e2b
 VOLC_IMAGE_PREFIX := $(VOLC_REGISTRY)/$(VOLC_NAMESPACE)
-IMAGE_TAG ?= 2026.30
+IMAGE_TAG ?= 2026.30.hugepage
 
 .PHONY: migrate
 migrate:
