@@ -243,6 +243,15 @@ func WithHugePagesBase(base uint64) TestOptions {
 	}
 }
 
+// WithoutHugePagesSample models a node that has registered but not yet reported
+// host metrics. Distinct from WithHugePages(0, 0, 0, size), a real sample of a
+// node with no pool.
+func WithoutHugePagesSample() TestOptions {
+	return func(node *TestNode) {
+		node.metrics.HugePageSizeBytes = 0
+	}
+}
+
 // MockSandboxClientCustom allows custom error logic per call
 type MockSandboxClientCustom struct {
 	orchestrator.SandboxServiceClient

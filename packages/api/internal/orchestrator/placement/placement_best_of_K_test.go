@@ -398,6 +398,7 @@ func TestBestOfK_ChooseNode_UnknownPoolLosesToReporter(t *testing.T) {
 func TestBestOfK_Score_HugepageFlagOffIgnoresPool(t *testing.T) {
 	t.Parallel()
 	config := DefaultBestOfKConfig()
+	config.R = 4
 	config.ScoreHugepages = false
 	algo := NewBestOfK(config).(*BestOfK)
 
@@ -419,6 +420,7 @@ func TestBestOfK_Score_HugepageFlagOffIgnoresPool(t *testing.T) {
 func TestBestOfK_Score_BusyCores(t *testing.T) {
 	t.Parallel()
 	config := DefaultBestOfKConfig()
+	config.R = 4
 	config.ScoreHugepages = false
 	algo := NewBestOfK(config).(*BestOfK)
 

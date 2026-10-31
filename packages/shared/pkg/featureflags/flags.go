@@ -549,6 +549,15 @@ func envdTimeoutFallbackMs() int {
 	return int(d.Milliseconds())
 }
 
+func hugePagesMaxUsagePercentageFallback() int {
+	v, err := env.GetEnvAsInt("HUGEPAGES_MAX_USAGE_PERCENTAGE", 75)
+	if err != nil {
+		return 75
+	}
+
+	return v
+}
+
 type IntFlag struct {
 	name     string
 	fallback int
@@ -591,7 +600,7 @@ var (
 	ClickhouseBatcherMaxDelay     = NewIntFlag("clickhouse-batcher-max-delay", 3000) // 1s in milliseconds
 	ClickhouseBatcherQueueSize    = NewIntFlag("clickhouse-batcher-queue-size", 20000)
 	BestOfKSampleSize             = NewIntFlag("best-of-k-sample-size", 3)                           // Default K=3
-	BestOfKMaxOvercommit          = NewIntFlag("best-of-k-max-overcommit", 400)                      // Default R=4 (stored as percentage, max over-commit ratio)
+	BestOfKMaxOvercommit          = NewIntFlag("best-of-k-max-overcommit", 800)                      // Default R=8 (stored as percentage, max over-commit ratio)
 	BestOfKAlpha                  = NewIntFlag("best-of-k-alpha", 50)                                // Default Alpha=0.5 (stored as percentage for int flag, current usage weight)
 	PlacementHugepageLimitPercent = NewIntFlag("placement-hugepage-limit-percent", 96)               // Share of a node's hugepage pool ceiling placement may commit; 0 disables the check
 	EnvdInitTimeoutMilliseconds   = NewIntFlag("envd-init-request-timeout-milliseconds", 50)         // Timeout for envd init request in milliseconds
@@ -643,6 +652,14 @@ var (
 	// without LaunchDarkly can turn it on.
 	CreateMemoryRefusalFlag       = NewBoolFlag("create-memory-refusal", envBoolOr("CREATE_MEMORY_REFUSAL", false))
 	MaxCacheWriterConcurrencyFlag = NewIntFlag("max-cache-writer-concurrency", 10)
+
+	// HugePagesMaxUsagePercentage is the hugepage pool utilization above which a
+	// node stops accepting new sandboxes. Guest RAM is faulted in on demand, so a
+	// node's capacity is bounded by its pool rather than by the RAM its sandboxes
+	// nominally declare. The headroom is reserved for running sandboxes to fault
+	// in further pages: exhausting the pool SIGBUSes the faulting VM. Non-positive
+	// disables the check. Falls back to the HUGEPAGES_MAX_USAGE_PERCENTAGE env var.
+	HugePagesMaxUsagePercentage = NewIntFlag("hugepages-max-usage-percentage", hugePagesMaxUsagePercentageFallback())
 
 	// BuildCacheMaxUsagePercentage the maximum percentage of the cache disk storage
 	// that can be used before the cache starts evicting items.

@@ -201,7 +201,11 @@ delivery or cache refresh is pending.
   cannot back while a sandbox on that node is still tearing down is refused
   with `ResourceExhausted`, so placement retries the node once the pages are
   back; with nothing tearing down it fails at once and says why. Off, it fails
-  as an internal error and the node is excluded.
+  as an internal error and the node is excluded. Independently, any node whose hugepage pool
+  (used + reserved, over `HugePages_Total`) is at or above `hugepages-max-usage-percentage`
+  (default 75%, `HUGEPAGES_MAX_USAGE_PERCENTAGE` without LaunchDarkly; 0 disables) is skipped,
+  leaving the rest of the pool for running sandboxes to fault into; the orchestrator re-checks
+  its own pool on `Create` and answers `ResourceExhausted`.
 - **State**: writes sandbox records to Redis (source of truth for *running* sandboxes). It does
   not write routing: client-proxy reads the orchestrator-written `sandbox:routing:{id}` (see
   "Sandbox routing records"). Persistent entities (templates, builds, snapshots, teams) live in
@@ -997,7 +1001,8 @@ sequenceDiagram
     after the last counted pause. Timeout auto-pauses are not limited.
 - **Resume**: same path as creation, but placement prefers the **origin node** — if the snapshot
   is still in its local cache, resume avoids any object-storage reads. The origin node gets
-  the same hugepage-limit check as any other node, so a full origin is skipped. `Checkpoint` is a
+  the same hugepage-limit check as any other node, so a full origin is skipped, and it is
+  dropped in favour of normal placement when its pool is past `hugepages-max-usage-percentage`. `Checkpoint` is a
   pause+resume in place used to persist state while keeping the sandbox running.
 - **Post-checkpoint re-init and the pre-pause cut**: after an in-place checkpoint the sandbox
   keeps running, so the orchestrator re-sends `/init` in the background to re-sync the guest

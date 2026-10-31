@@ -272,6 +272,16 @@ func (s *Server) Create(ctx context.Context, req *orchestrator.SandboxCreateRequ
 		}
 	}
 
+	// Hugepage pool backstop. The API applies the same threshold at placement
+	// time, but off a node-info snapshot that can be up to one poll interval
+	// stale, and a resume pinned to its origin node can bypass sampling
+	// altogether. Re-check here against this node's own sample: exhausting the
+	// pool SIGBUSes a faulting Firecracker, killing an already-running sandbox,
+	// so the last word belongs to the node that owns the pool.
+	if err := s.checkHugePagesHeadroom(ctx); err != nil {
+		return nil, err
+	}
+
 	// Check the limit while taking the ID so in-flight starts count too.
 	maxRunningSandboxesPerNode := s.info.MaxSandboxes.Load()
 	reservation, err := s.sandboxFactory.Sandboxes.ReserveWithin(req.GetSandbox().GetSandboxId(), maxRunningSandboxesPerNode)

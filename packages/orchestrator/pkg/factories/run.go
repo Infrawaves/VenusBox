@@ -1038,6 +1038,7 @@ func run(config cfg.Config, opts Options) (success bool) {
 		Persistence:      persistence,
 		TemplateStorage:  templateSpec,
 		FeatureFlags:     featureFlags,
+		HostMetrics:      hostMetrics,
 		SbxEventsService: eventsService,
 		PeerRegistry:     peerRegistry,
 		Uploads:          uploads,
