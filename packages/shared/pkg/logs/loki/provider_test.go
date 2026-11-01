@@ -56,7 +56,7 @@ func TestBuildSandboxLogsQueryWithoutSearch(t *testing.T) {
 
 	query := buildSandboxLogsQuery("team`id", "sandbox`id", nil, nil)
 
-	assert.Equal(t, "{teamID=`teamid`, sandboxID=`sandboxid`, category!=\"metrics\"}", query)
+	assert.Equal(t, "{teamID=`teamid`, category!=\"metrics\"} | sandboxID=`sandboxid`", query)
 }
 
 func TestBuildSandboxLogsQueryWithMessageSearch(t *testing.T) {
@@ -67,7 +67,7 @@ func TestBuildSandboxLogsQueryWithMessageSearch(t *testing.T) {
 
 	assert.Equal(
 		t,
-		"{teamID=`team-id`, sandboxID=`sandbox-id`, category!=\"metrics\"} | json | message =~ `.*hello \\(world\\)\\+.*`",
+		"{teamID=`team-id`, category!=\"metrics\"} | sandboxID=`sandbox-id` | json | message =~ `.*hello \\(world\\)\\+.*`",
 		query,
 	)
 }
@@ -93,7 +93,7 @@ func TestBuildSandboxLogsQueryEscapesInjectionLikeSearchInput(t *testing.T) {
 
 	assert.Equal(
 		t,
-		"{teamID=`team-id`, sandboxID=`sandbox-id`, category!=\"metrics\"} | json | message =~ `.*foo\\.\\*\\(bar\\)\\+\\?\\|baz\\\\qux \\| json \\| level =~ error.*`",
+		"{teamID=`team-id`, category!=\"metrics\"} | sandboxID=`sandbox-id` | json | message =~ `.*foo\\.\\*\\(bar\\)\\+\\?\\|baz\\\\qux \\| json \\| level =~ error.*`",
 		query,
 	)
 }

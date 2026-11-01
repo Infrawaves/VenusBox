@@ -147,7 +147,11 @@ func buildSandboxLogsQuery(teamID string, sandboxID string, level *logs.LogLevel
 	sandboxIDSanitized := sanitizeLokiLabel(sandboxID)
 	teamIDSanitized := sanitizeLokiLabel(teamID)
 
-	query := fmt.Sprintf("{teamID=`%s`, sandboxID=`%s`, category!=\"metrics\"}", teamIDSanitized, sandboxIDSanitized)
+	// sandboxID 是高基数字段，日志采集端（vector）将其写入 Loki 的
+	// structured_metadata 而非 stream label（避免 stream 笛卡尔积爆炸）。
+	// 因此必须用管道过滤 `| sandboxID=...` 匹配 structured_metadata，
+	// 不能放进 `{}` 的 label 选择器（否则匹配不到任何流，日志查询恒为空）。
+	query := fmt.Sprintf("{teamID=`%s`, category!=\"metrics\"} | sandboxID=`%s`", teamIDSanitized, sandboxIDSanitized)
 	if level == nil && utils.DerefOrDefault(search, "") == "" {
 		return query
 	}
