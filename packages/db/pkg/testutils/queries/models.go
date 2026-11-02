@@ -172,6 +172,12 @@ type EnvDefault struct {
 	Description pgtype.Text
 }
 
+type PlatformAdmin struct {
+	UserID    uuid.UUID
+	Role      string
+	CreatedAt time.Time
+}
+
 type ProjectLimit struct {
 	TeamID                   uuid.UUID
 	MaxLengthHours           int64

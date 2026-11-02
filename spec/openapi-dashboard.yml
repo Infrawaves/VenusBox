@@ -302,6 +302,19 @@ components:
             $ref: "#/components/schemas/Error"
 
   schemas:
+    SuperAdminMe:
+      type: object
+      description: The signed-in user's platform role, for gating admin surfaces in the dashboard.
+      required:
+        - platformRole
+      properties:
+        platformRole:
+          type: string
+          nullable: true
+          enum:
+            - platform_admin
+            - super_admin
+          description: The caller's platform role, or `null` when the caller has no platform role.
     Error:
       type: object
       required:
@@ -2063,5 +2076,24 @@ paths:
           $ref: "#/components/responses/404"
         "409":
           $ref: "#/components/responses/409"
+        "500":
+          $ref: "#/components/responses/500"
+
+  /super-admin/me:
+    get:
+      summary: Get the signed-in user's platform role
+      description: Returns the caller's platform role, or `null` when they have none. Any signed-in user may call this; it lets the dashboard decide whether to show admin surfaces without exposing a 403.
+      tags: [super-admin]
+      security:
+        - AuthProviderBearerAuth: []
+      responses:
+        "200":
+          description: Successfully returned the caller's platform role.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuperAdminMe"
+        "401":
+          $ref: "#/components/responses/401"
         "500":
           $ref: "#/components/responses/500"

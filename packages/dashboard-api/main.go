@@ -19,6 +19,7 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	middleware "github.com/oapi-codegen/gin-middleware"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
@@ -27,6 +28,7 @@ import (
 	"go.uber.org/zap/zapcore"
 
 	sharedauth "github.com/e2b-dev/infra/packages/auth/pkg/auth"
+	authtypes "github.com/e2b-dev/infra/packages/auth/pkg/types"
 	clickhouse "github.com/e2b-dev/infra/packages/clickhouse/pkg"
 	"github.com/e2b-dev/infra/packages/dashboard-api/internal/api"
 	"github.com/e2b-dev/infra/packages/dashboard-api/internal/cfg"
@@ -270,7 +272,24 @@ func run() int {
 		nil,
 	)
 
-	s := newHTTPServer(config.Port, l, tel, swagger, authenticationFunc, apiStore, dashboardmiddleware.RefuseDeletedProject(db.Dashboard))
+	platformRoleLookup := func(ctx context.Context, userID uuid.UUID) (authtypes.PlatformRole, bool, error) {
+		role, err := db.GetPlatformRoleByUserID(ctx, userID)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return "", false, nil
+			}
+
+			return "", false, err
+		}
+
+		return authtypes.PlatformRole(role), true, nil
+	}
+
+	s := newHTTPServer(config.Port, l, tel, swagger, authenticationFunc, apiStore,
+		dashboardmiddleware.RefuseDeletedProject(db.Dashboard),
+		sharedauth.ResolvePlatformRole(platformRoleLookup),
+		dashboardmiddleware.EnforcePlatformRole(),
+	)
 	httpInner, err := (&net.ListenConfig{}).Listen(ctx, "tcp", s.Addr)
 	if err != nil {
 		l.Error(ctx, "Listening on the HTTP port", zap.Error(err))
@@ -355,6 +374,8 @@ func newHTTPServer(
 	authenticationFunc openapi3filter.AuthenticationFunc,
 	store api.ServerInterface,
 	refuseDeletedProject gin.HandlerFunc,
+	resolvePlatformRole gin.HandlerFunc,
+	enforcePlatformRole gin.HandlerFunc,
 ) *http.Server {
 	r := gin.New()
 	r.Use(gin.Recovery())
@@ -425,8 +446,9 @@ func newHTTPServer(
 	)
 
 	// After authentication, so an unauthenticated request never reads the
-	// database.
-	r.Use(dashboardmiddleware.EnforceBlockedTeam(), refuseDeletedProject)
+	// database. resolvePlatformRole records the caller's platform role (if any)
+	// so enforcePlatformRole can gate the /super-admin routes.
+	r.Use(dashboardmiddleware.EnforceBlockedTeam(), refuseDeletedProject, resolvePlatformRole, enforcePlatformRole)
 
 	api.RegisterHandlers(r, store)
 
