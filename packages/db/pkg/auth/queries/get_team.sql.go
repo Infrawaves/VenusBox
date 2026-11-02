@@ -12,7 +12,7 @@ import (
 )
 
 const getTeamByAPIKey = `-- name: GetTeamByAPIKey :one
-SELECT t.id, t.created_at, t.is_blocked, t.name, t.tier, t.email, t.is_banned, t.blocked_reason, t.cluster_id, t.sandbox_scheduling_labels, t.sso_organization_id, t.sso_auto_join, t.deleted_at, t.slug,
+SELECT t.id, t.created_at, t.is_blocked, t.name, t.tier, t.email, t.is_banned, t.blocked_reason, t.cluster_id, t.sandbox_scheduling_labels, t.sso_organization_id, t.sso_auto_join, t.deleted_at, t.slug, t.profile_picture_url,
     ps.sandbox_default_allow_public_traffic,
     COALESCE(pl.max_length_hours, d.max_length_hours) AS max_length_hours,
     COALESCE(pl.concurrent_sandboxes, d.concurrent_sandboxes) AS concurrent_sandboxes,
@@ -76,6 +76,7 @@ func (q *Queries) GetTeamByAPIKey(ctx context.Context, apiKeyHash string) (GetTe
 		&i.Team.SsoAutoJoin,
 		&i.Team.DeletedAt,
 		&i.Team.Slug,
+		&i.Team.ProfilePictureUrl,
 		&i.SandboxDefaultAllowPublicTraffic,
 		&i.MaxLengthHours,
 		&i.ConcurrentSandboxes,
@@ -95,7 +96,7 @@ func (q *Queries) GetTeamByAPIKey(ctx context.Context, apiKeyHash string) (GetTe
 }
 
 const getTeamByTeamAndUser = `-- name: GetTeamByTeamAndUser :one
-SELECT t.id, t.created_at, t.is_blocked, t.name, t.tier, t.email, t.is_banned, t.blocked_reason, t.cluster_id, t.sandbox_scheduling_labels, t.sso_organization_id, t.sso_auto_join, t.deleted_at, t.slug,
+SELECT t.id, t.created_at, t.is_blocked, t.name, t.tier, t.email, t.is_banned, t.blocked_reason, t.cluster_id, t.sandbox_scheduling_labels, t.sso_organization_id, t.sso_auto_join, t.deleted_at, t.slug, t.profile_picture_url,
     ps.sandbox_default_allow_public_traffic,
     COALESCE(pl.max_length_hours, d.max_length_hours) AS max_length_hours,
     COALESCE(pl.concurrent_sandboxes, d.concurrent_sandboxes) AS concurrent_sandboxes,
@@ -159,6 +160,7 @@ func (q *Queries) GetTeamByTeamAndUser(ctx context.Context, arg GetTeamByTeamAnd
 		&i.Team.SsoAutoJoin,
 		&i.Team.DeletedAt,
 		&i.Team.Slug,
+		&i.Team.ProfilePictureUrl,
 		&i.SandboxDefaultAllowPublicTraffic,
 		&i.MaxLengthHours,
 		&i.ConcurrentSandboxes,
@@ -178,7 +180,7 @@ func (q *Queries) GetTeamByTeamAndUser(ctx context.Context, arg GetTeamByTeamAnd
 }
 
 const getTeamByTeamID = `-- name: GetTeamByTeamID :one
-SELECT t.id, t.created_at, t.is_blocked, t.name, t.tier, t.email, t.is_banned, t.blocked_reason, t.cluster_id, t.sandbox_scheduling_labels, t.sso_organization_id, t.sso_auto_join, t.deleted_at, t.slug,
+SELECT t.id, t.created_at, t.is_blocked, t.name, t.tier, t.email, t.is_banned, t.blocked_reason, t.cluster_id, t.sandbox_scheduling_labels, t.sso_organization_id, t.sso_auto_join, t.deleted_at, t.slug, t.profile_picture_url,
     ps.sandbox_default_allow_public_traffic,
     COALESCE(pl.max_length_hours, d.max_length_hours) AS max_length_hours,
     COALESCE(pl.concurrent_sandboxes, d.concurrent_sandboxes) AS concurrent_sandboxes,
@@ -236,6 +238,7 @@ func (q *Queries) GetTeamByTeamID(ctx context.Context, id uuid.UUID) (GetTeamByT
 		&i.Team.SsoAutoJoin,
 		&i.Team.DeletedAt,
 		&i.Team.Slug,
+		&i.Team.ProfilePictureUrl,
 		&i.SandboxDefaultAllowPublicTraffic,
 		&i.MaxLengthHours,
 		&i.ConcurrentSandboxes,
@@ -255,7 +258,7 @@ func (q *Queries) GetTeamByTeamID(ctx context.Context, id uuid.UUID) (GetTeamByT
 }
 
 const getUserTeamsWithLimits = `-- name: GetUserTeamsWithLimits :many
-SELECT t.id, t.created_at, t.is_blocked, t.name, t.tier, t.email, t.is_banned, t.blocked_reason, t.cluster_id, t.sandbox_scheduling_labels, t.sso_organization_id, t.sso_auto_join, t.deleted_at, t.slug, ut.is_default,
+SELECT t.id, t.created_at, t.is_blocked, t.name, t.tier, t.email, t.is_banned, t.blocked_reason, t.cluster_id, t.sandbox_scheduling_labels, t.sso_organization_id, t.sso_auto_join, t.deleted_at, t.slug, t.profile_picture_url, ut.is_default,
     ps.sandbox_default_allow_public_traffic,
     COALESCE(pl.max_length_hours, d.max_length_hours) AS max_length_hours,
     COALESCE(pl.concurrent_sandboxes, d.concurrent_sandboxes) AS concurrent_sandboxes,
@@ -321,6 +324,7 @@ func (q *Queries) GetUserTeamsWithLimits(ctx context.Context, userID uuid.UUID) 
 			&i.Team.SsoAutoJoin,
 			&i.Team.DeletedAt,
 			&i.Team.Slug,
+			&i.Team.ProfilePictureUrl,
 			&i.IsDefault,
 			&i.SandboxDefaultAllowPublicTraffic,
 			&i.MaxLengthHours,

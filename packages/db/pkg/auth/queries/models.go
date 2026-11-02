@@ -25,6 +25,7 @@ type Team struct {
 	SsoAutoJoin             bool
 	DeletedAt               *time.Time
 	Slug                    string
+	ProfilePictureUrl       *string
 }
 
 type TeamApiKey struct {

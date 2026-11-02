@@ -13,7 +13,7 @@ import (
 )
 
 const listAllTeams = `-- name: ListAllTeams :many
-SELECT t.id, t.created_at, t.is_blocked, t.name, t.tier, t.email, t.is_banned, t.blocked_reason, t.cluster_id, t.sandbox_scheduling_labels, t.sso_organization_id, t.sso_auto_join, t.deleted_at, t.slug, tl.id, tl.max_length_hours, tl.concurrent_sandboxes, tl.concurrent_template_builds, tl.max_vcpu, tl.max_ram_mb, tl.disk_mb, tl.events_ttl_days, tl.default_free_disk_size_mb, tl.max_disk_size_mb, tl.max_free_disk_size_mb, tl.api_team_rps_list, tl.api_team_rps_delete, tl.max_secrets
+SELECT t.id, t.created_at, t.is_blocked, t.name, t.tier, t.email, t.is_banned, t.blocked_reason, t.cluster_id, t.sandbox_scheduling_labels, t.sso_organization_id, t.sso_auto_join, t.deleted_at, t.slug, t.profile_picture_url, tl.id, tl.max_length_hours, tl.concurrent_sandboxes, tl.concurrent_template_builds, tl.max_vcpu, tl.max_ram_mb, tl.disk_mb, tl.events_ttl_days, tl.default_free_disk_size_mb, tl.max_disk_size_mb, tl.max_free_disk_size_mb, tl.api_team_rps_list, tl.api_team_rps_delete, tl.max_secrets
 FROM "public"."teams" t
 JOIN "public"."team_limits" tl ON tl.id = t.id
 WHERE (t.created_at, t.id) < ($1::timestamptz, $2::uuid)
@@ -80,6 +80,7 @@ func (q *Queries) ListAllTeams(ctx context.Context, arg ListAllTeamsParams) ([]L
 			&i.Team.SsoAutoJoin,
 			&i.Team.DeletedAt,
 			&i.Team.Slug,
+			&i.Team.ProfilePictureUrl,
 			&i.TeamLimit.ID,
 			&i.TeamLimit.MaxLengthHours,
 			&i.TeamLimit.ConcurrentSandboxes,

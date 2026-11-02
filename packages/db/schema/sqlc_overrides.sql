@@ -4,6 +4,10 @@
 
 ALTER TABLE teams ADD COLUMN slug TEXT NOT NULL;
 
+-- profile_picture_url was dropped from the main migrations but restored directly
+-- in the database; the super-admin team queries select it via sqlc.embed(t).
+ALTER TABLE teams ADD COLUMN profile_picture_url TEXT;
+
 CREATE SCHEMA IF NOT EXISTS billing;
 
 CREATE TABLE IF NOT EXISTS billing.sandbox_logs (
