@@ -13,11 +13,17 @@ import (
 // Global read-only views are platform_admin. /super-admin/me is intentionally absent:
 // it reports the caller's role and must not 403, so the dashboard can gate its UI.
 var platformRoleRoutes = map[string]types.PlatformRole{
-	http.MethodGet + " /super-admin/teams":     types.PlatformRoleAdmin,
-	http.MethodGet + " /super-admin/users":     types.PlatformRoleAdmin,
-	http.MethodGet + " /super-admin/templates": types.PlatformRoleAdmin,
-	http.MethodGet + " /super-admin/snapshots": types.PlatformRoleAdmin,
-	http.MethodGet + " /super-admin/stats":     types.PlatformRoleAdmin,
+	http.MethodGet + " /super-admin/teams":         types.PlatformRoleAdmin,
+	http.MethodGet + " /super-admin/users":         types.PlatformRoleAdmin,
+	http.MethodGet + " /super-admin/users/:userID": types.PlatformRoleAdmin,
+	http.MethodGet + " /super-admin/templates":     types.PlatformRoleAdmin,
+	http.MethodGet + " /super-admin/builds":        types.PlatformRoleAdmin,
+	http.MethodGet + " /super-admin/snapshots":     types.PlatformRoleAdmin,
+	http.MethodGet + " /super-admin/stats":         types.PlatformRoleAdmin,
+
+	// High-risk writes require super_admin.
+	http.MethodPut + " /super-admin/teams/:teamID/limits": types.PlatformRoleSuperAdmin,
+	http.MethodPut + " /super-admin/teams/:teamID/block":  types.PlatformRoleSuperAdmin,
 }
 
 // EnforcePlatformRole gates the routes in platformRoleRoutes on their minimum platform role. Must run after auth.

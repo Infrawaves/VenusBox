@@ -39,6 +39,7 @@ import (
 	sqlcdb "github.com/e2b-dev/infra/packages/db/client"
 	authdb "github.com/e2b-dev/infra/packages/db/pkg/auth"
 	"github.com/e2b-dev/infra/packages/db/pkg/pool"
+	"github.com/e2b-dev/infra/packages/db/queries"
 	e2benv "github.com/e2b-dev/infra/packages/shared/pkg/env"
 	"github.com/e2b-dev/infra/packages/shared/pkg/factories"
 	"github.com/e2b-dev/infra/packages/shared/pkg/featureflags"
@@ -285,6 +286,13 @@ func run() int {
 		return authtypes.PlatformRole(role), true, nil
 	}
 
+	// Seed configured super admins into platform_admins on startup.
+	if err := seedSuperAdmins(ctx, db, config.SuperAdminUserIDs); err != nil {
+		l.Error(ctx, "seeding super admins", zap.Error(err))
+
+		return 1
+	}
+
 	s := newHTTPServer(config.Port, l, tel, swagger, authenticationFunc, apiStore,
 		dashboardmiddleware.RefuseDeletedProject(db.Dashboard),
 		sharedauth.ResolvePlatformRole(platformRoleLookup),
@@ -330,6 +338,30 @@ func run() int {
 
 func main() {
 	os.Exit(run())
+}
+
+// seedSuperAdmins upserts each configured user UUID as super_admin. Invalid UUIDs fail fast rather than silently granting nothing.
+func seedSuperAdmins(ctx context.Context, db *sqlcdb.Client, userIDs []string) error {
+	for _, raw := range userIDs {
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" {
+			continue
+		}
+
+		userID, err := uuid.Parse(trimmed)
+		if err != nil {
+			return fmt.Errorf("invalid SUPER_ADMIN_USER_IDS entry %q: %w", trimmed, err)
+		}
+
+		if err := db.UpsertPlatformAdmin(ctx, queries.UpsertPlatformAdminParams{
+			UserID: userID,
+			Role:   string(authtypes.PlatformRoleSuperAdmin),
+		}); err != nil {
+			return fmt.Errorf("upsert super admin %s: %w", userID, err)
+		}
+	}
+
+	return nil
 }
 
 // newIdentityService builds the Ory-backed identity service when Ory is

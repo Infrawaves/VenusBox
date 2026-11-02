@@ -30,6 +30,87 @@ components:
       name: X-Team-ID
 
   parameters:
+    builds_search:
+      name: search
+      in: query
+      required: false
+      description: Case-insensitive substring match on build id, template alias, template id, or team name.
+      schema:
+        type: string
+
+    snapshots_cursor:
+      name: cursor
+      in: query
+      required: false
+      description: Cursor returned by the previous list response in `created_at|snapshot_id` format.
+      schema:
+        type: string
+
+    snapshots_limit:
+      name: limit
+      in: query
+      required: false
+      description: Maximum number of items to return per page.
+      schema:
+        type: integer
+        format: int32
+        minimum: 1
+        maximum: 100
+        default: 50
+
+    snapshots_search:
+      name: search
+      in: query
+      required: false
+      description: Case-insensitive substring match on sandbox id, base template id/alias, or team name.
+      schema:
+        type: string
+
+    snapshots_team:
+      name: team_id
+      in: query
+      required: false
+      description: Filter snapshots to a single owning team.
+      schema:
+        type: string
+        format: uuid
+
+    teams_search:
+      name: search
+      in: query
+      required: false
+      description: Case-insensitive substring match on team name or slug.
+      schema:
+        type: string
+
+    teams_statuses:
+      name: statuses
+      in: query
+      required: false
+      description: Comma-separated list of team statuses to include (active, blocked, banned).
+      schema:
+        type: array
+        items:
+          type: string
+          enum: [active, blocked, banned]
+
+    templates_team:
+      name: team_id
+      in: query
+      required: false
+      description: Filter templates to a single owning team.
+      schema:
+        type: string
+        format: uuid
+
+    users_search:
+      name: search
+      in: query
+      required: false
+      description: Case-insensitive substring match on user email or name.
+      schema:
+        type: string
+
     build_id:
       name: build_id
       in: path
@@ -302,6 +383,395 @@ components:
             $ref: "#/components/schemas/Error"
 
   schemas:
+    SuperAdminTeam:
+      type: object
+      description: A team as seen in the cross-team super-admin view, not scoped to any user's membership.
+      required:
+        - id
+        - name
+        - slug
+        - tier
+        - email
+        - profilePictureUrl
+        - isBlocked
+        - isBanned
+        - blockedReason
+        - limits
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        slug:
+          type: string
+        tier:
+          type: string
+        email:
+          type: string
+        profilePictureUrl:
+          type: string
+          nullable: true
+        isBlocked:
+          type: boolean
+        isBanned:
+          type: boolean
+        blockedReason:
+          type: string
+          nullable: true
+        limits:
+          $ref: "#/components/schemas/UserTeamLimits"
+        createdAt:
+          type: string
+          format: date-time
+
+    SuperAdminTeamsResponse:
+      type: object
+      required:
+        - data
+        - nextCursor
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/SuperAdminTeam"
+        nextCursor:
+          type: string
+          nullable: true
+          description: Cursor to pass to the next list request, or `null` if there is no next page.
+
+    SuperAdminStats:
+      type: object
+      description: Platform-wide aggregate counts for the super-admin overview.
+      required:
+        - teamCount
+        - userCount
+        - templateCount
+        - buildCount
+      properties:
+        teamCount:
+          type: integer
+          format: int64
+          description: Total number of teams on the platform.
+        userCount:
+          type: integer
+          format: int64
+          description: Total number of users on the platform.
+        templateCount:
+          type: integer
+          format: int64
+          description: Total number of templates across all teams.
+        buildCount:
+          type: integer
+          format: int64
+          description: Total number of builds across all teams.
+
+    SuperAdminUser:
+      type: object
+      description: A platform user with the teams they belong to, for the super-admin user list.
+      required:
+        - userID
+        - teams
+        - createdAt
+      properties:
+        userID:
+          type: string
+          format: uuid
+        email:
+          type: string
+          nullable: true
+          description: Email of the user, or `null` when the profile could not be resolved.
+        name:
+          type: string
+          nullable: true
+        teams:
+          type: array
+          description: The teams the user belongs to.
+          items:
+            type: object
+            required:
+              - teamID
+              - name
+            properties:
+              teamID:
+                type: string
+                format: uuid
+              name:
+                type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    SuperAdminUsersResponse:
+      type: object
+      required:
+        - data
+        - nextCursor
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/SuperAdminUser"
+        nextCursor:
+          type: string
+          nullable: true
+          description: Cursor to pass to the next list request, or `null` if there is no next page.
+
+    SuperAdminTemplate:
+      description: A team template with its owning team's attribution, for the cross-team super-admin view.
+      allOf:
+        - $ref: "#/components/schemas/TeamTemplate"
+        - type: object
+          required:
+            - teamID
+            - teamName
+          properties:
+            teamID:
+              type: string
+              format: uuid
+            teamName:
+              type: string
+
+    SuperAdminTemplatesResponse:
+      type: object
+      required:
+        - data
+        - nextCursor
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/SuperAdminTemplate"
+        nextCursor:
+          type: string
+          nullable: true
+          description: Cursor to pass to the next list request, or `null` if there is no next page.
+
+    SuperAdminBuild:
+      description: A build with its owning team's attribution, for the cross-team super-admin view.
+      allOf:
+        - $ref: "#/components/schemas/ListedBuild"
+        - type: object
+          required:
+            - teamID
+            - teamName
+          properties:
+            teamID:
+              type: string
+              format: uuid
+            teamName:
+              type: string
+
+    SuperAdminBuildsResponse:
+      type: object
+      required:
+        - data
+        - nextCursor
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/SuperAdminBuild"
+        nextCursor:
+          type: string
+          nullable: true
+          description: Cursor to pass to the next list request, or `null` if there is no next page.
+
+    SuperAdminSnapshot:
+      type: object
+      description: A currently-paused sandbox (snapshot) with team attribution and resource config, for the cross-team super-admin view.
+      required:
+        - snapshotID
+        - sandboxID
+        - envID
+        - baseTemplateID
+        - teamID
+        - teamName
+        - sandboxStartedAt
+        - pausedAt
+        - autoPause
+        - envSecure
+        - cpuCount
+        - memoryMB
+      properties:
+        snapshotID:
+          type: string
+          format: uuid
+          description: The snapshot row id.
+        sandboxID:
+          type: string
+          description: The sandbox this snapshot was derived from.
+        envID:
+          type: string
+          description: The snapshot's own env id.
+        baseTemplateID:
+          type: string
+          description: The base template env id the sandbox was started from.
+        baseTemplateAlias:
+          type: string
+          description: Human-readable alias of the base template, if any.
+        teamID:
+          type: string
+          format: uuid
+        teamName:
+          type: string
+        sandboxStartedAt:
+          type: string
+          format: date-time
+          description: When the original sandbox was started.
+        pausedAt:
+          type: string
+          format: date-time
+          description: When the sandbox was paused (snapshot row creation time).
+        autoPause:
+          type: boolean
+          description: Whether the sandbox was auto-paused (vs explicitly paused).
+        originNodeID:
+          type: string
+          description: The node the snapshot was written on.
+        envSecure:
+          type: boolean
+        allowInternetAccess:
+          type: boolean
+          nullable: true
+        cpuCount:
+          type: integer
+          format: int64
+        memoryMB:
+          type: integer
+          format: int64
+        diskSizeMB:
+          type: integer
+          format: int64
+          nullable: true
+        envdVersion:
+          type: string
+          nullable: true
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+
+    SuperAdminSnapshotsResponse:
+      type: object
+      required:
+        - data
+        - nextCursor
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/SuperAdminSnapshot"
+        nextCursor:
+          type: string
+          nullable: true
+          description: Cursor to pass to the next list request, or `null` if there is no next page.
+
+    UpdateTeamLimitsRequest:
+      type: object
+      description: Absolute per-team quota overrides written to project_limits. Every field required.
+      required:
+        - maxLengthHours
+        - concurrentSandboxes
+        - concurrentTemplateBuilds
+        - maxVcpu
+        - maxRamMb
+        - diskMb
+        - eventsTtlDays
+        - defaultFreeDiskSizeMb
+        - maxDiskSizeMb
+      properties:
+        maxLengthHours:
+          type: integer
+          format: int64
+          minimum: 0
+        concurrentSandboxes:
+          type: integer
+          format: int64
+          minimum: 0
+        concurrentTemplateBuilds:
+          type: integer
+          format: int64
+          minimum: 0
+        maxVcpu:
+          type: integer
+          format: int64
+          minimum: 0
+        maxRamMb:
+          type: integer
+          format: int64
+          minimum: 0
+        diskMb:
+          type: integer
+          format: int64
+          minimum: 0
+        eventsTtlDays:
+          type: integer
+          format: int64
+          minimum: 0
+        defaultFreeDiskSizeMb:
+          type: integer
+          format: int64
+          minimum: 0
+        maxDiskSizeMb:
+          type: integer
+          format: int64
+          minimum: 0
+
+    SetTeamBlockedRequest:
+      type: object
+      description: Block or unblock a team. When blocking, an optional reason is stored and returned to the team on rejected requests.
+      required:
+        - isBlocked
+      properties:
+        isBlocked:
+          type: boolean
+        blockedReason:
+          type: string
+          nullable: true
+
+    UserTeamLimits:
+      type: object
+      required:
+        - maxLengthHours
+        - concurrentSandboxes
+        - concurrentTemplateBuilds
+        - maxVcpu
+        - maxRamMb
+        - diskMb
+        - eventsTtlDays
+      properties:
+        maxLengthHours:
+          type: integer
+          format: int64
+        concurrentSandboxes:
+          type: integer
+          format: int64
+        concurrentTemplateBuilds:
+          type: integer
+          format: int64
+        maxVcpu:
+          type: integer
+          format: int64
+        maxRamMb:
+          type: integer
+          format: int64
+        diskMb:
+          type: integer
+          format: int64
+        eventsTtlDays:
+          type: integer
+          format: int64
+        defaultFreeDiskSizeMb:
+          type: integer
+          format: int64
+          description: Present in the super-admin view; the free disk allowance per sandbox.
+        maxDiskSizeMb:
+          type: integer
+          format: int64
+          description: Present in the super-admin view; the max disk size ceiling.
+
     SuperAdminMe:
       type: object
       description: The signed-in user's platform role, for gating admin surfaces in the dashboard.
@@ -2097,3 +2567,270 @@ paths:
           $ref: "#/components/responses/401"
         "500":
           $ref: "#/components/responses/500"
+  /super-admin/stats:
+    get:
+      summary: Get platform-wide totals
+      description: Returns aggregate counts (teams, users, templates, builds) across the whole platform for the super-admin overview. Requires a signed-in user with a platform role.
+      tags: [super-admin]
+      security:
+        - AuthProviderBearerAuth: []
+      responses:
+        "200":
+          description: Successfully returned platform totals.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuperAdminStats"
+        "401":
+          $ref: "#/components/responses/401"
+        "403":
+          $ref: "#/components/responses/403"
+        "500":
+          $ref: "#/components/responses/500"
+
+  /super-admin/teams:
+    get:
+      summary: List all teams across the platform
+      description: Returns a paginated list of every team on the platform with its limits, not scoped to any user's membership. Requires a signed-in user with a platform role. Keyset cursor pagination ordered by creation time (newest first).
+      tags: [super-admin]
+      security:
+        - AuthProviderBearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/teams_search"
+        - $ref: "#/components/parameters/teams_statuses"
+        - $ref: "#/components/parameters/builds_limit"
+        - $ref: "#/components/parameters/builds_cursor"
+      responses:
+        "200":
+          description: Successfully returned paginated teams.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuperAdminTeamsResponse"
+        "400":
+          $ref: "#/components/responses/400"
+        "401":
+          $ref: "#/components/responses/401"
+        "403":
+          $ref: "#/components/responses/403"
+        "500":
+          $ref: "#/components/responses/500"
+
+  /super-admin/templates:
+    get:
+      summary: List all templates across teams
+      description: Returns a paginated list of every team-owned template across all teams, each with its owning team's id and name. Requires a signed-in user with a platform role. Keyset cursor pagination ordered by creation time (newest first).
+      tags: [super-admin]
+      security:
+        - AuthProviderBearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/templates_search"
+        - $ref: "#/components/parameters/templates_public"
+        - $ref: "#/components/parameters/templates_team"
+        - $ref: "#/components/parameters/templates_sort"
+        - $ref: "#/components/parameters/templates_limit"
+        - $ref: "#/components/parameters/templates_cursor"
+      responses:
+        "200":
+          description: Successfully returned paginated templates.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuperAdminTemplatesResponse"
+        "400":
+          $ref: "#/components/responses/400"
+        "401":
+          $ref: "#/components/responses/401"
+        "403":
+          $ref: "#/components/responses/403"
+        "500":
+          $ref: "#/components/responses/500"
+
+  /super-admin/builds:
+    get:
+      summary: List all builds across teams
+      description: Returns a paginated list of builds across all teams, each with its owning team's id and name. Requires a signed-in user with a platform role. Keyset cursor pagination ordered by creation time (newest first).
+      tags: [super-admin]
+      security:
+        - AuthProviderBearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/builds_search"
+        - $ref: "#/components/parameters/builds_limit"
+        - $ref: "#/components/parameters/builds_cursor"
+        - $ref: "#/components/parameters/build_statuses"
+      responses:
+        "200":
+          description: Successfully returned paginated builds.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuperAdminBuildsResponse"
+        "400":
+          $ref: "#/components/responses/400"
+        "401":
+          $ref: "#/components/responses/401"
+        "403":
+          $ref: "#/components/responses/403"
+        "500":
+          $ref: "#/components/responses/500"
+
+  /super-admin/snapshots:
+    get:
+      summary: List all paused sandboxes (snapshots) across teams
+      description: Returns a paginated list of currently-paused sandboxes across all teams, each with its owning team, base template, pause time, and resource config. Requires a signed-in user with a platform role. Keyset cursor pagination ordered by pause time (newest first).
+      tags: [super-admin]
+      security:
+        - AuthProviderBearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/snapshots_search"
+        - $ref: "#/components/parameters/snapshots_team"
+        - $ref: "#/components/parameters/snapshots_limit"
+        - $ref: "#/components/parameters/snapshots_cursor"
+      responses:
+        "200":
+          description: Successfully returned paginated snapshots.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuperAdminSnapshotsResponse"
+        "400":
+          $ref: "#/components/responses/400"
+        "401":
+          $ref: "#/components/responses/401"
+        "403":
+          $ref: "#/components/responses/403"
+        "500":
+          $ref: "#/components/responses/500"
+
+  /super-admin/users:
+    get:
+      summary: List all users across the platform
+      description: Returns a paginated list of every platform user with the teams they belong to. Requires a signed-in user with a platform role. Keyset cursor pagination ordered by creation time (newest first). When search is set, matching is done against the identity provider (email/name) and a single unpaginated page of results is returned.
+      tags: [super-admin]
+      security:
+        - AuthProviderBearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/users_search"
+        - $ref: "#/components/parameters/builds_limit"
+        - $ref: "#/components/parameters/builds_cursor"
+      responses:
+        "200":
+          description: Successfully returned paginated users.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuperAdminUsersResponse"
+        "400":
+          $ref: "#/components/responses/400"
+        "401":
+          $ref: "#/components/responses/401"
+        "403":
+          $ref: "#/components/responses/403"
+        "500":
+          $ref: "#/components/responses/500"
+
+  /super-admin/teams/{teamID}/limits:
+    put:
+      summary: Update a team's resource limits
+      description: Overrides a team's effective quota (concurrent sandboxes, template builds, disk, etc.) by writing project_limits directly. Requires a signed-in user with a platform role.
+      tags: [super-admin]
+      security:
+        - AuthProviderBearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/teamID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateTeamLimitsRequest"
+      responses:
+        "204":
+          description: Successfully updated team limits.
+        "400":
+          $ref: "#/components/responses/400"
+        "401":
+          $ref: "#/components/responses/401"
+        "403":
+          $ref: "#/components/responses/403"
+        "500":
+          $ref: "#/components/responses/500"
+
+  /super-admin/teams/{teamID}/block:
+    put:
+      summary: Block or unblock a team
+      description: Sets a team's blocked state. A blocked team has all its API requests rejected with 403 by the blocked-team middleware. Requires a signed-in super admin.
+      tags: [super-admin]
+      security:
+        - AuthProviderBearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/teamID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetTeamBlockedRequest"
+      responses:
+        "204":
+          description: Successfully updated the team's blocked state.
+        "400":
+          $ref: "#/components/responses/400"
+        "401":
+          $ref: "#/components/responses/401"
+        "403":
+          $ref: "#/components/responses/403"
+        "500":
+          $ref: "#/components/responses/500"
+
+  /super-admin/users/{userID}:
+    get:
+      summary: Get a user's detail
+      description: Returns a single platform user with the teams they belong to. Requires a signed-in user with a platform role.
+      tags: [super-admin]
+      security:
+        - AuthProviderBearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/userID"
+      responses:
+        "200":
+          description: Successfully returned the user.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuperAdminUser"
+        "401":
+          $ref: "#/components/responses/401"
+        "403":
+          $ref: "#/components/responses/403"
+        "404":
+          $ref: "#/components/responses/404"
+        "500":
+          $ref: "#/components/responses/500"
+    delete:
+      summary: Delete a user
+      description: Permanently deletes the user's platform records and identity-provider identity. Requires a signed-in super admin.
+      tags: [super-admin]
+      security:
+        - AuthProviderBearerAuth: []
+      parameters:
+        - name: userID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: User deleted.
+        "401":
+          $ref: "#/components/responses/401"
+        "403":
+          $ref: "#/components/responses/403"
+        "404":
+          $ref: "#/components/responses/404"
+        "409":
+          $ref: "#/components/responses/409"
+        "500":
+          $ref: "#/components/responses/500"
+

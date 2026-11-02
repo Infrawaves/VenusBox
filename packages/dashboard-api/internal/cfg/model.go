@@ -32,6 +32,9 @@ type Config struct {
 	OrySDKURL          string `env:"ORY_SDK_URL"`
 	OryProjectAPIToken string `env:"ORY_PROJECT_API_TOKEN,unset"`
 
+	// SuperAdminUserIDs are internal user UUIDs seeded as super_admin on startup.
+	SuperAdminUserIDs []string `env:"SUPER_ADMIN_USER_IDS" envSeparator:","`
+
 	// TLS is the mutual TLS settings of the HTTP port.
 	TLS TLSConfig
 }
