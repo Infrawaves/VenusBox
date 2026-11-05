@@ -4,6 +4,7 @@ package sandbox
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -250,7 +251,67 @@ func (u *Uploads) find(ctx context.Context, buildID uuid.UUID, t build.DiffType)
 	return dev, release, err
 }
 
-// --- Cross-orch upload-done signaling (Redis pub/sub on per-build channels) ---
+// --- TOS layer reference-counting event publishing (Redis List, best-effort) ---
+//
+// tosLayerEventsListKey is a plain Redis List, not the webhook-gated
+// RedisStreamsDelivery used elsewhere in this codebase (that implementation
+// checks a per-team subscription key before publishing, which would silently
+// drop events for teams with no webhook configured). This is a throwaway dev
+// validation of the write path (TOS reference-counting design); production
+// hardening (Streams, consumer groups, ack/retry) is tracked separately.
+const tosLayerEventsListKey = "tos.layer.ref.events"
+
+// tosLayerEvent is pushed once per (build_id, file_type) after its header is
+// durably written to TOS, carrying everything the consumer needs to record
+// the dependency edges and bump the ancestor reference counts.
+type tosLayerEvent struct {
+	BuildID      string   `json:"build_id"`
+	FileType     string   `json:"file_type"`
+	AncestorIDs  []string `json:"ancestor_ids"`
+	EventType    string   `json:"event_type"` // "upload" (this is the only producer for now)
+	Timestamp    int64    `json:"timestamp"`  // unix seconds
+}
+
+// publishTOSLayerEvent pushes a tosLayerEvent for the given build's header
+// onto a Redis List. Best-effort: a publish failure is logged and swallowed,
+// never returned, so a hiccup in this analytics side-channel can never fail
+// the build itself — the header is already durably in TOS by the time this
+// is called.
+func (u *Uploads) publishTOSLayerEvent(ctx context.Context, buildID uuid.UUID, fileType build.DiffType, mapping header.Mapping) {
+	if u.redis == nil {
+		return
+	}
+
+	ancestorIDs := mapping.Builds()
+	ancestorStrs := make([]string, 0, len(ancestorIDs))
+	for _, id := range ancestorIDs {
+		ancestorStrs = append(ancestorStrs, id.String())
+	}
+
+	payload, err := json.Marshal(tosLayerEvent{
+		BuildID:     buildID.String(),
+		FileType:    string(fileType),
+		AncestorIDs: ancestorStrs,
+		EventType:   "upload",
+		Timestamp:   time.Now().Unix(),
+	})
+	if err != nil {
+		logger.L().Warn(ctx, "failed to marshal tos layer event",
+			logger.WithBuildID(buildID.String()),
+			zap.Error(err),
+		)
+
+		return
+	}
+
+	if err := u.redis.LPush(ctx, tosLayerEventsListKey, payload).Err(); err != nil {
+		logger.L().Warn(ctx, "failed to publish tos layer event",
+			logger.WithBuildID(buildID.String()),
+			zap.String("file_type", string(fileType)),
+			zap.Error(err),
+		)
+	}
+}
 
 func uploadDoneChannel(buildID uuid.UUID) string {
 	return uploadDoneChannelPrefix + buildID.String()
