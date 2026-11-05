@@ -138,21 +138,28 @@ func handleEvent(ctx context.Context, pool *pgxpool.Pool, payload string) error 
 	}
 }
 
-// applyUploadEvent records build_id -> each ancestor_id as an edge and bumps
-// ref_count only for edges that did not already exist — this is what makes
-// the +1 tolerant of the same event being processed more than once (not a
-// concern for this List-based dev run, but kept correct for when this logic
-// moves onto a redelivering queue).
+// applyUploadEvent registers buildID itself in tos_ancestor_reference_count
+// (ref_count defaulting to 0 if it has no row yet — every build that lands
+// in TOS must be queryable there, not just builds that happen to already
+// have a downstream dependent), then records build_id -> each ancestor_id as
+// an edge and bumps ref_count only for edges that did not already exist —
+// this is what makes the +1 tolerant of the same event being processed more
+// than once (not a concern for this List-based dev run, but kept correct for
+// when this logic moves onto a redelivering queue).
 func applyUploadEvent(ctx context.Context, pool *pgxpool.Pool, buildID uuid.UUID, fileType string, ancestorIDs []uuid.UUID) error {
-	if len(ancestorIDs) == 0 {
-		return nil
-	}
-
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // rollback is a no-op after Commit
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO tos_ancestor_reference_count (ancestor_id, ref_count)
+		VALUES ($1, 0)
+		ON CONFLICT (ancestor_id) DO NOTHING
+	`, buildID); err != nil {
+		return fmt.Errorf("register build %s in reference count table: %w", buildID, err)
+	}
 
 	for _, ancestorID := range ancestorIDs {
 		var inserted bool
