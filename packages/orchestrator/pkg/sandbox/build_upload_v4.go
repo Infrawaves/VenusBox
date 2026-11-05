@@ -136,21 +136,7 @@ func (u *Upload) uploadFramed(
 		return fmt.Errorf("store %s header: %w", fileType, err)
 	}
 
-	// TEMPORARY verification logging for the TOS layer reference-counting
-	// design — confirms Mapping.Builds() on the just-stored header already
-	// contains the full ancestor chain regardless of cache hits upstream.
-	// Remove once cross-checked against tos-gc-demo output.
-	ancestorIDs := srcHeader.Mapping.Builds()
-	ancestorStrs := make([]string, 0, len(ancestorIDs))
-	for _, id := range ancestorIDs {
-		ancestorStrs = append(ancestorStrs, id.String())
-	}
-	logger.L().Info(ctx, "tos layer ancestors",
-		logger.WithBuildID(u.buildID.String()),
-		zap.String("file_type", string(fileType)),
-		zap.Int("ancestor_count", len(ancestorStrs)),
-		zap.Strings("ancestor_ids", ancestorStrs),
-	)
+	logTOSLayerAncestors(ctx, u.buildID, fileType, srcHeader.Mapping)
 
 	return u.publish(ctx, fileType, h)
 }
@@ -339,4 +325,25 @@ func recordAncestorResolution(ctx context.Context, verdict AncestorVerdict, reso
 		attribute.String("verdict", string(verdict)),
 		attribute.String("resolution", string(resolution)),
 	))
+}
+
+// logTOSLayerAncestors is TEMPORARY verification logging for the TOS layer
+// reference-counting design — called from both the V3 (build_upload_v3.go)
+// and V4 (uploadFramed above) upload paths right after a header is persisted,
+// to confirm Mapping.Builds() on the just-stored header already contains the
+// full ancestor chain regardless of cache hits upstream or which path wrote
+// the header. Remove once cross-checked against tos-gc-demo output on both
+// paths.
+func logTOSLayerAncestors(ctx context.Context, buildID uuid.UUID, fileType build.DiffType, mapping headers.Mapping) {
+	ancestorIDs := mapping.Builds()
+	ancestorStrs := make([]string, 0, len(ancestorIDs))
+	for _, id := range ancestorIDs {
+		ancestorStrs = append(ancestorStrs, id.String())
+	}
+	logger.L().Info(ctx, "tos layer ancestors",
+		logger.WithBuildID(buildID.String()),
+		zap.String("file_type", string(fileType)),
+		zap.Int("ancestor_count", len(ancestorStrs)),
+		zap.Strings("ancestor_ids", ancestorStrs),
+	)
 }
