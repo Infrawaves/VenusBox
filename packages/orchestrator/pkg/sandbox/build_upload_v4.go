@@ -136,6 +136,22 @@ func (u *Upload) uploadFramed(
 		return fmt.Errorf("store %s header: %w", fileType, err)
 	}
 
+	// TEMPORARY verification logging for the TOS layer reference-counting
+	// design — confirms Mapping.Builds() on the just-stored header already
+	// contains the full ancestor chain regardless of cache hits upstream.
+	// Remove once cross-checked against tos-gc-demo output.
+	ancestorIDs := srcHeader.Mapping.Builds()
+	ancestorStrs := make([]string, 0, len(ancestorIDs))
+	for _, id := range ancestorIDs {
+		ancestorStrs = append(ancestorStrs, id.String())
+	}
+	logger.L().Info(ctx, "tos layer ancestors",
+		logger.WithBuildID(u.buildID.String()),
+		zap.String("file_type", string(fileType)),
+		zap.Int("ancestor_count", len(ancestorStrs)),
+		zap.Strings("ancestor_ids", ancestorStrs),
+	)
+
 	return u.publish(ctx, fileType, h)
 }
 
