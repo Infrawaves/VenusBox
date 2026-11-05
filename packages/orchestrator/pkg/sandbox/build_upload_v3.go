@@ -146,7 +146,9 @@ func (u *Upload) runV3(ctx context.Context) error {
 		if err := u.appendAncestorBuilds(ctx, nil, memfileDiffHeader.Mapping, build.Memfile); err != nil {
 			return err
 		}
-		logTOSLayerAncestors(ctx, u.buildID, build.Memfile, memfileDiffHeader.Mapping)
+		if u.uploads != nil {
+			u.uploads.publishTOSLayerEvent(ctx, u.buildID, build.Memfile, memfileDiffHeader.Mapping)
+		}
 	}
 	if h := finalizeV3(memfileDiffHeader); h != nil {
 		if err := u.publish(ctx, build.Memfile, h); err != nil {
@@ -158,7 +160,9 @@ func (u *Upload) runV3(ctx context.Context) error {
 		if err := u.appendAncestorBuilds(ctx, nil, rootfsDiffHeader.Mapping, build.Rootfs); err != nil {
 			return err
 		}
-		logTOSLayerAncestors(ctx, u.buildID, build.Rootfs, rootfsDiffHeader.Mapping)
+		if u.uploads != nil {
+			u.uploads.publishTOSLayerEvent(ctx, u.buildID, build.Rootfs, rootfsDiffHeader.Mapping)
+		}
 	}
 	if h := finalizeV3(rootfsDiffHeader); h != nil {
 		if err := u.publish(ctx, build.Rootfs, h); err != nil {
