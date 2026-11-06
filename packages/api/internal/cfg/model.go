@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"path"
 	"reflect"
 	"slices"
 	"strings"
@@ -155,6 +156,8 @@ type Config struct {
 
 	VolumesToken VolumesTokenConfig
 
+	VolumeQuota VolumeQuotaConfig
+
 	AuthProvider      sharedauth.ProviderConfig `env:"AUTH_PROVIDER_CONFIG"`
 	AdminAuthProvider sharedauth.ProviderConfig `env:"ADMIN_AUTH_PROVIDER_CONFIG"`
 
@@ -232,6 +235,73 @@ func newFailureError(condition FailureCondition, message string) error {
 }
 
 type JWTSigningKey any
+
+// VolumeQuotaConfig wires team volume quotas to vePFS. A team's volumes live in
+// <volume-root>/team-<id>. Paths identifies that volume root inside the vePFS
+// file system; the orchestrator verifies the mapping against its actual mount.
+// Volume types missing from FileSystems are not bounded.
+type VolumeQuotaConfig struct {
+	// FileSystems maps a persistent volume type to the ID of the vePFS file
+	// system behind it, e.g. "vepfs-cn-beijing:vepfs-cnbja1b2c3d4".
+	FileSystems map[string]string `env:"VEPFS_QUOTA_FILE_SYSTEMS"`
+	// Paths maps a volume type to its parent directory inside the vePFS file
+	// system, e.g. "vepfs:/volumes". Omitted entries use the filesystem root.
+	// This is not the node's local mount path; the node verifies the mapping.
+	Paths map[string]string `env:"VEPFS_QUOTA_PATHS"`
+
+	Region string `env:"VEPFS_QUOTA_REGION"`
+	// Endpoint overrides the OpenAPI endpoint, e.g. for a VPC endpoint. Empty
+	// uses the public one of Region.
+	Endpoint        string `env:"VEPFS_QUOTA_ENDPOINT"`
+	AccessKeyID     string `env:"VEPFS_QUOTA_ACCESS_KEY_ID"`
+	SecretAccessKey string `env:"VEPFS_QUOTA_SECRET_ACCESS_KEY"`
+}
+
+// IsConfigured reports whether any volume type is backed by a vePFS quota.
+func (c VolumeQuotaConfig) IsConfigured() bool {
+	return len(c.FileSystems) > 0
+}
+
+func (c VolumeQuotaConfig) validate() error {
+	if !c.IsConfigured() {
+		if len(c.Paths) > 0 {
+			return errors.New("VEPFS_QUOTA_PATHS requires VEPFS_QUOTA_FILE_SYSTEMS")
+		}
+		return nil
+	}
+
+	var missing []string
+	if c.Region == "" {
+		missing = append(missing, "VEPFS_QUOTA_REGION")
+	}
+	if c.AccessKeyID == "" {
+		missing = append(missing, "VEPFS_QUOTA_ACCESS_KEY_ID")
+	}
+	if c.SecretAccessKey == "" {
+		missing = append(missing, "VEPFS_QUOTA_SECRET_ACCESS_KEY")
+	}
+	for volumeType, fileSystemID := range c.FileSystems {
+		if fileSystemID == "" {
+			missing = append(missing, fmt.Sprintf("VEPFS_QUOTA_FILE_SYSTEMS[%s]", volumeType))
+		}
+	}
+	for volumeType, parent := range c.Paths {
+		if _, ok := c.FileSystems[volumeType]; !ok {
+			return fmt.Errorf("VEPFS_QUOTA_PATHS[%s] has no configured file system", volumeType)
+		}
+		if !path.IsAbs(parent) || (path.Clean(parent) != strings.TrimSuffix(parent, "/") && parent != "/") {
+			return fmt.Errorf("VEPFS_QUOTA_PATHS[%s] must be a clean absolute filesystem path", volumeType)
+		}
+	}
+
+	if len(missing) > 0 {
+		slices.Sort(missing)
+
+		return fmt.Errorf("VEPFS_QUOTA_FILE_SYSTEMS is set but the following are missing: %s", strings.Join(missing, ", "))
+	}
+
+	return nil
+}
 
 type VolumesTokenConfig struct {
 	// Enabled explicitly toggles volume content token signing. When true (the
@@ -344,6 +414,10 @@ func Parse() (Config, error) {
 	}
 
 	if err := config.VolumesToken.validate(); err != nil {
+		return config, err
+	}
+
+	if err := config.VolumeQuota.validate(); err != nil {
 		return config, err
 	}
 

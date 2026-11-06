@@ -227,6 +227,21 @@ func TestUpsertProjectLimitsCarriesDeleteRatesToTheTeamLookup(t *testing.T) {
 	}
 }
 
+func TestUpsertProjectLimitsRejectsTheRetiredVolumeQuotaField(t *testing.T) {
+	t.Parallel()
+
+	for _, value := range []string{"100", "0", "null"} {
+		t.Run(value, func(t *testing.T) {
+			t.Parallel()
+
+			body := strings.Replace(validLimitsBody, `"revision": 2`, `"revision": 2, "volume_quota_gib": `+value, 1)
+			recorder := callUpsertProjectLimits(t, &APIStore{}, uuid.New(), body)
+			require.Equal(t, http.StatusBadRequest, recorder.Code)
+			require.Contains(t, recorder.Body.String(), "/volume-quota")
+		})
+	}
+}
+
 func TestUpsertProjectLimitsRejectsAMalformedBody(t *testing.T) {
 	t.Parallel()
 

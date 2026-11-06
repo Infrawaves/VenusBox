@@ -19,15 +19,17 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	VolumeService_CreateVolume_FullMethodName = "/VolumeService/CreateVolume"
-	VolumeService_DeleteVolume_FullMethodName = "/VolumeService/DeleteVolume"
-	VolumeService_CreateDir_FullMethodName    = "/VolumeService/CreateDir"
-	VolumeService_ListDir_FullMethodName      = "/VolumeService/ListDir"
-	VolumeService_CreateFile_FullMethodName   = "/VolumeService/CreateFile"
-	VolumeService_GetFile_FullMethodName      = "/VolumeService/GetFile"
-	VolumeService_DeletePath_FullMethodName   = "/VolumeService/DeletePath"
-	VolumeService_StatPath_FullMethodName     = "/VolumeService/StatPath"
-	VolumeService_UpdatePath_FullMethodName   = "/VolumeService/UpdatePath"
+	VolumeService_CreateVolume_FullMethodName          = "/VolumeService/CreateVolume"
+	VolumeService_ValidateVolumeMount_FullMethodName   = "/VolumeService/ValidateVolumeMount"
+	VolumeService_CreateVolumeWithQuota_FullMethodName = "/VolumeService/CreateVolumeWithQuota"
+	VolumeService_DeleteVolume_FullMethodName          = "/VolumeService/DeleteVolume"
+	VolumeService_CreateDir_FullMethodName             = "/VolumeService/CreateDir"
+	VolumeService_ListDir_FullMethodName               = "/VolumeService/ListDir"
+	VolumeService_CreateFile_FullMethodName            = "/VolumeService/CreateFile"
+	VolumeService_GetFile_FullMethodName               = "/VolumeService/GetFile"
+	VolumeService_DeletePath_FullMethodName            = "/VolumeService/DeletePath"
+	VolumeService_StatPath_FullMethodName              = "/VolumeService/StatPath"
+	VolumeService_UpdatePath_FullMethodName            = "/VolumeService/UpdatePath"
 )
 
 // VolumeServiceClient is the client API for VolumeService service.
@@ -36,6 +38,9 @@ const (
 type VolumeServiceClient interface {
 	// volume operations
 	CreateVolume(ctx context.Context, in *CreateVolumeRequest, opts ...grpc.CallOption) (*CreateVolumeResponse, error)
+	// Check quota storage identity without creating any directories.
+	ValidateVolumeMount(ctx context.Context, in *CreateVolumeWithQuotaRequest, opts ...grpc.CallOption) (*CreateVolumeResponse, error)
+	CreateVolumeWithQuota(ctx context.Context, in *CreateVolumeWithQuotaRequest, opts ...grpc.CallOption) (*CreateVolumeResponse, error)
 	DeleteVolume(ctx context.Context, in *DeleteVolumeRequest, opts ...grpc.CallOption) (*DeleteVolumeResponse, error)
 	// directory operations
 	CreateDir(ctx context.Context, in *CreateDirRequest, opts ...grpc.CallOption) (*CreateDirResponse, error)
@@ -61,6 +66,26 @@ func (c *volumeServiceClient) CreateVolume(ctx context.Context, in *CreateVolume
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(CreateVolumeResponse)
 	err := c.cc.Invoke(ctx, VolumeService_CreateVolume_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *volumeServiceClient) ValidateVolumeMount(ctx context.Context, in *CreateVolumeWithQuotaRequest, opts ...grpc.CallOption) (*CreateVolumeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateVolumeResponse)
+	err := c.cc.Invoke(ctx, VolumeService_ValidateVolumeMount_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *volumeServiceClient) CreateVolumeWithQuota(ctx context.Context, in *CreateVolumeWithQuotaRequest, opts ...grpc.CallOption) (*CreateVolumeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateVolumeResponse)
+	err := c.cc.Invoke(ctx, VolumeService_CreateVolumeWithQuota_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -165,6 +190,9 @@ func (c *volumeServiceClient) UpdatePath(ctx context.Context, in *UpdatePathRequ
 type VolumeServiceServer interface {
 	// volume operations
 	CreateVolume(context.Context, *CreateVolumeRequest) (*CreateVolumeResponse, error)
+	// Check quota storage identity without creating any directories.
+	ValidateVolumeMount(context.Context, *CreateVolumeWithQuotaRequest) (*CreateVolumeResponse, error)
+	CreateVolumeWithQuota(context.Context, *CreateVolumeWithQuotaRequest) (*CreateVolumeResponse, error)
 	DeleteVolume(context.Context, *DeleteVolumeRequest) (*DeleteVolumeResponse, error)
 	// directory operations
 	CreateDir(context.Context, *CreateDirRequest) (*CreateDirResponse, error)
@@ -188,6 +216,12 @@ type UnimplementedVolumeServiceServer struct{}
 
 func (UnimplementedVolumeServiceServer) CreateVolume(context.Context, *CreateVolumeRequest) (*CreateVolumeResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateVolume not implemented")
+}
+func (UnimplementedVolumeServiceServer) ValidateVolumeMount(context.Context, *CreateVolumeWithQuotaRequest) (*CreateVolumeResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ValidateVolumeMount not implemented")
+}
+func (UnimplementedVolumeServiceServer) CreateVolumeWithQuota(context.Context, *CreateVolumeWithQuotaRequest) (*CreateVolumeResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateVolumeWithQuota not implemented")
 }
 func (UnimplementedVolumeServiceServer) DeleteVolume(context.Context, *DeleteVolumeRequest) (*DeleteVolumeResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteVolume not implemented")
@@ -248,6 +282,42 @@ func _VolumeService_CreateVolume_Handler(srv interface{}, ctx context.Context, d
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(VolumeServiceServer).CreateVolume(ctx, req.(*CreateVolumeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _VolumeService_ValidateVolumeMount_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateVolumeWithQuotaRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(VolumeServiceServer).ValidateVolumeMount(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: VolumeService_ValidateVolumeMount_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(VolumeServiceServer).ValidateVolumeMount(ctx, req.(*CreateVolumeWithQuotaRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _VolumeService_CreateVolumeWithQuota_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateVolumeWithQuotaRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(VolumeServiceServer).CreateVolumeWithQuota(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: VolumeService_CreateVolumeWithQuota_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(VolumeServiceServer).CreateVolumeWithQuota(ctx, req.(*CreateVolumeWithQuotaRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -388,6 +458,14 @@ var VolumeService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CreateVolume",
 			Handler:    _VolumeService_CreateVolume_Handler,
+		},
+		{
+			MethodName: "ValidateVolumeMount",
+			Handler:    _VolumeService_ValidateVolumeMount_Handler,
+		},
+		{
+			MethodName: "CreateVolumeWithQuota",
+			Handler:    _VolumeService_CreateVolumeWithQuota_Handler,
 		},
 		{
 			MethodName: "DeleteVolume",
