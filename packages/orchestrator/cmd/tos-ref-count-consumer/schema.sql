@@ -11,9 +11,16 @@
 -- dependency relationship. The sole purpose of this table is to make the
 -- ref_count +1/-1 below idempotent under at-least-once event delivery — it
 -- is NOT queried to decide whether a build can be deleted.
+--
+-- env_id carries the owning template's id (envs.id / env_builds.env_id,
+-- e.g. "ihvujp327d7kt4rox2l5") straight from the upload's objectMetadata, so
+-- a template soft-delete can clear every edge it ever produced in one pass
+-- without re-querying env_builds/env_build_assignments for build history.
+-- Empty when the uploader had no template_id in objectMetadata (dev tooling).
 CREATE TABLE IF NOT EXISTS tos_build_edges (
     build_id      uuid NOT NULL,
     ancestor_id   uuid NOT NULL,
+    env_id        text NOT NULL DEFAULT '',
     source        text NOT NULL,
     recorded_at   timestamptz NOT NULL DEFAULT now(),
     deleted_at    timestamptz,
@@ -22,6 +29,10 @@ CREATE TABLE IF NOT EXISTS tos_build_edges (
 
 CREATE INDEX IF NOT EXISTS idx_tos_build_edges_ancestor_id
     ON tos_build_edges (ancestor_id)
+    WHERE deleted_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_tos_build_edges_env_id
+    ON tos_build_edges (env_id)
     WHERE deleted_at IS NULL;
 
 -- Table 2: the only table a deletion decision should query. ref_count = 0

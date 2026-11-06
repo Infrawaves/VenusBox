@@ -137,7 +137,7 @@ func (u *Upload) uploadFramed(
 	}
 
 	if u.uploads != nil {
-		u.uploads.publishTOSLayerEvent(ctx, u.buildID, fileType, srcHeader.Mapping)
+		u.uploads.publishTOSLayerEvent(ctx, u.buildID, u.objectMetadata[storage.ObjectMetadataTemplateID], fileType, srcHeader.Mapping)
 	}
 
 	return u.publish(ctx, fileType, h)
