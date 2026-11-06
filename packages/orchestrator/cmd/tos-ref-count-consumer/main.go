@@ -48,6 +48,7 @@ const tosLayerEventsListKey = "tos.layer.ref.events"
 // NBD, etc.) that this consumer has no need for.
 type tosLayerEvent struct {
 	BuildID     string   `json:"build_id"`
+	EnvID       string   `json:"env_id"` // envs.id / env_builds.env_id, e.g. "ihvujp327d7kt4rox2l5"; empty for dev tooling
 	FileType    string   `json:"file_type"`
 	AncestorIDs []string `json:"ancestor_ids"`
 	EventType   string   `json:"event_type"`
@@ -74,6 +75,8 @@ func main() {
 	defer pool.Close()
 
 	log.Printf("tos-ref-count-consumer started, redis=%s list=%s", redisURL, tosLayerEventsListKey)
+
+	go runSoftDeleteScanner(ctx, pool, 30*time.Second)
 
 	for {
 		select {
@@ -132,7 +135,7 @@ func handleEvent(ctx context.Context, pool *pgxpool.Pool, payload string) error 
 
 	switch event.EventType {
 	case "upload":
-		return applyUploadEvent(ctx, pool, buildID, event.FileType, ancestorIDs)
+		return applyUploadEvent(ctx, pool, buildID, event.EnvID, event.FileType, ancestorIDs)
 	default:
 		return fmt.Errorf("unknown event_type %q", event.EventType)
 	}
@@ -146,7 +149,7 @@ func handleEvent(ctx context.Context, pool *pgxpool.Pool, payload string) error 
 // this is what makes the +1 tolerant of the same event being processed more
 // than once (not a concern for this List-based dev run, but kept correct for
 // when this logic moves onto a redelivering queue).
-func applyUploadEvent(ctx context.Context, pool *pgxpool.Pool, buildID uuid.UUID, fileType string, ancestorIDs []uuid.UUID) error {
+func applyUploadEvent(ctx context.Context, pool *pgxpool.Pool, buildID uuid.UUID, envID string, fileType string, ancestorIDs []uuid.UUID) error {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
@@ -164,11 +167,11 @@ func applyUploadEvent(ctx context.Context, pool *pgxpool.Pool, buildID uuid.UUID
 	for _, ancestorID := range ancestorIDs {
 		var inserted bool
 		err := tx.QueryRow(ctx, `
-			INSERT INTO tos_build_edges (build_id, ancestor_id, source)
-			VALUES ($1, $2, 'live_upload')
+			INSERT INTO tos_build_edges (build_id, ancestor_id, env_id, source)
+			VALUES ($1, $2, $3, 'live_upload')
 			ON CONFLICT (build_id, ancestor_id) DO NOTHING
 			RETURNING true
-		`, buildID, ancestorID).Scan(&inserted)
+		`, buildID, ancestorID, envID).Scan(&inserted)
 
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
@@ -207,4 +210,155 @@ func getenv(key, fallback string) string {
 	}
 
 	return fallback
+}
+
+// runSoftDeleteScanner periodically reads envs.deleted_at (the production
+// template soft-delete timestamp, set by packages/api/internal/handlers/
+// template_delete.go — no event hook into that path exists or is needed)
+// and clears every edge this consumer has recorded for each newly-deleted
+// template, decrementing ref_count accordingly.
+//
+// Polling envs.deleted_at directly — rather than wiring a delete event out
+// of the API — means zero changes to API code: this is a read-only query
+// against a timestamp the production delete path already sets.
+//
+// watermark starts at the scanner's own start time so a restart does not
+// re-scan the full historical backlog of already-deleted templates; each
+// tick advances it past the newest deleted_at seen. Since the edge-clearing
+// UPDATE below is itself idempotent (its WHERE deleted_at IS NULL guard
+// means re-processing the same env_id a second time is a no-op), losing
+// track of the watermark across a restart only costs a wider re-scan, not
+// correctness.
+func runSoftDeleteScanner(ctx context.Context, pool *pgxpool.Pool, interval time.Duration) {
+	watermark := time.Now().Add(-interval) // catch anything deleted just before startup
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+
+		newWatermark, err := scanSoftDeletedTemplates(ctx, pool, watermark)
+		if err != nil {
+			log.Printf("soft-delete scan failed, will retry next tick: %s", err)
+
+			continue
+		}
+		watermark = newWatermark
+	}
+}
+
+// scanSoftDeletedTemplates finds envs soft-deleted since since, clears their
+// edges, and returns the newest deleted_at seen (or since, unchanged, if
+// nothing new was found).
+func scanSoftDeletedTemplates(ctx context.Context, pool *pgxpool.Pool, since time.Time) (time.Time, error) {
+	rows, err := pool.Query(ctx, `
+		SELECT id, deleted_at FROM envs
+		WHERE deleted_at IS NOT NULL AND deleted_at > $1
+		ORDER BY deleted_at ASC
+	`, since)
+	if err != nil {
+		return since, fmt.Errorf("query soft-deleted envs: %w", err)
+	}
+	defer rows.Close()
+
+	newest := since
+	count := 0
+	for rows.Next() {
+		var envID string
+		var deletedAt time.Time
+		if err := rows.Scan(&envID, &deletedAt); err != nil {
+			return since, fmt.Errorf("scan soft-deleted env row: %w", err)
+		}
+
+		if err := applyTemplateSoftDelete(ctx, pool, envID); err != nil {
+			// Fail closed: stop advancing the watermark past an env_id that
+			// did not get its edges cleared, so the next tick retries it
+			// rather than silently skipping it forever.
+			return newest, fmt.Errorf("apply soft delete for env %s: %w", envID, err)
+		}
+
+		if deletedAt.After(newest) {
+			newest = deletedAt
+		}
+		count++
+	}
+	if err := rows.Err(); err != nil {
+		return since, fmt.Errorf("iterate soft-deleted envs: %w", err)
+	}
+
+	if count > 0 {
+		log.Printf("soft-delete scan: processed %d newly-deleted template(s)", count)
+	}
+
+	return newest, nil
+}
+
+// applyTemplateSoftDelete clears every edge recorded under envID (every
+// build this template ever produced, not just whatever it currently points
+// to — this is the whole point of carrying env_id on the edge instead of
+// re-deriving a build history from env_builds/env_build_assignments) and
+// decrements ref_count for each ancestor that actually had a live edge
+// cleared. The UPDATE's WHERE deleted_at IS NULL guard makes this
+// idempotent: re-running it for an env_id already processed finds no rows
+// and does nothing.
+func applyTemplateSoftDelete(ctx context.Context, pool *pgxpool.Pool, envID string) error {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // rollback is a no-op after Commit
+
+	rows, err := tx.Query(ctx, `
+		UPDATE tos_build_edges
+		SET deleted_at = now()
+		WHERE env_id = $1 AND deleted_at IS NULL
+		RETURNING ancestor_id
+	`, envID)
+	if err != nil {
+		return fmt.Errorf("clear edges for env %s: %w", envID, err)
+	}
+
+	var ancestorIDs []uuid.UUID
+	for rows.Next() {
+		var ancestorID uuid.UUID
+		if err := rows.Scan(&ancestorID); err != nil {
+			rows.Close()
+
+			return fmt.Errorf("scan cleared edge ancestor_id: %w", err)
+		}
+		ancestorIDs = append(ancestorIDs, ancestorID)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate cleared edges for env %s: %w", envID, err)
+	}
+
+	for _, ancestorID := range ancestorIDs {
+		// ref_count's CHECK (ref_count >= 0) is the backstop here: every live
+		// edge (deleted_at IS NULL) should correspond to exactly one +1
+		// already applied, so clearing it should never drive the count
+		// negative. If this fails, something upstream double-counted a -1 or
+		// under-counted a +1 — fail the whole batch loudly rather than let
+		// the constraint violation get swallowed into a silently wrong count.
+		if _, err := tx.Exec(ctx, `
+			UPDATE tos_ancestor_reference_count
+			SET ref_count = ref_count - 1, updated_at = now()
+			WHERE ancestor_id = $1
+		`, ancestorID); err != nil {
+			return fmt.Errorf("decrement ref_count for %s: %w", ancestorID, err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit tx: %w", err)
+	}
+
+	log.Printf("env=%s soft-deleted, cleared %d edge(s)", envID, len(ancestorIDs))
+
+	return nil
 }

@@ -265,11 +265,12 @@ const tosLayerEventsListKey = "tos.layer.ref.events"
 // durably written to TOS, carrying everything the consumer needs to record
 // the dependency edges and bump the ancestor reference counts.
 type tosLayerEvent struct {
-	BuildID      string   `json:"build_id"`
-	FileType     string   `json:"file_type"`
-	AncestorIDs  []string `json:"ancestor_ids"`
-	EventType    string   `json:"event_type"` // "upload" (this is the only producer for now)
-	Timestamp    int64    `json:"timestamp"`  // unix seconds
+	BuildID     string   `json:"build_id"`
+	EnvID       string   `json:"env_id"` // empty when the caller had no template_id in objectMetadata (e.g. dev tooling)
+	FileType    string   `json:"file_type"`
+	AncestorIDs []string `json:"ancestor_ids"`
+	EventType   string   `json:"event_type"` // "upload" (this is the only producer for now)
+	Timestamp   int64    `json:"timestamp"`  // unix seconds
 }
 
 // publishTOSLayerEvent pushes a tosLayerEvent for the given build's header
@@ -277,7 +278,13 @@ type tosLayerEvent struct {
 // never returned, so a hiccup in this analytics side-channel can never fail
 // the build itself — the header is already durably in TOS by the time this
 // is called.
-func (u *Uploads) publishTOSLayerEvent(ctx context.Context, buildID uuid.UUID, fileType build.DiffType, mapping header.Mapping) {
+//
+// envID is the template this build belongs to (storage.ObjectMetadataTemplateID
+// from the caller's objectMetadata — same string as envs.id/env_builds.env_id),
+// carried on the edge so a later template soft-delete can clear every edge
+// this template ever produced in one pass, without re-querying
+// env_builds/env_build_assignments for its build history.
+func (u *Uploads) publishTOSLayerEvent(ctx context.Context, buildID uuid.UUID, envID string, fileType build.DiffType, mapping header.Mapping) {
 	if u.redis == nil {
 		return
 	}
@@ -290,6 +297,7 @@ func (u *Uploads) publishTOSLayerEvent(ctx context.Context, buildID uuid.UUID, f
 
 	payload, err := json.Marshal(tosLayerEvent{
 		BuildID:     buildID.String(),
+		EnvID:       envID,
 		FileType:    string(fileType),
 		AncestorIDs: ancestorStrs,
 		EventType:   "upload",
