@@ -330,6 +330,17 @@ func (lb *LayerExecutor) UploadSnapshot(
 
 	objectMetadata := lb.BuildContext.Config.ObjectMetadata(buildOrigin)
 
+	// TEMPORARY debug logging for the TOS layer reference-counting design —
+	// confirms what template_id actually lands in objectMetadata at the real
+	// call site, since the Go struct chain reads correct on paper but a real
+	// build produced an empty template_id downstream. Remove once confirmed.
+	logger.L().Info(ctx, "tos ref-count debug: objectMetadata at upload construction",
+		logger.WithBuildID(meta.Template.BuildID),
+		zap.String("config_template_id", lb.BuildContext.Config.TemplateID),
+		zap.String("object_metadata_template_id", objectMetadata[storage.ObjectMetadataTemplateID]),
+		zap.String("build_origin", string(buildOrigin)),
+	)
+
 	upload, err := sandbox.NewUpload(ctx, lb.uploads, snapshot, lb.templateStorage, lb.compressConfig, lb.ff, storage.UseCaseBuild, objectMetadata, finishUpload)
 	if err != nil {
 		return fmt.Errorf("register upload: %w", err)
