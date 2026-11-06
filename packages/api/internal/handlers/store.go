@@ -31,6 +31,7 @@ import (
 	"github.com/e2b-dev/infra/packages/api/internal/sandbox"
 	template_manager "github.com/e2b-dev/infra/packages/api/internal/template-manager"
 	"github.com/e2b-dev/infra/packages/api/internal/utils"
+	"github.com/e2b-dev/infra/packages/api/internal/volumequota"
 	sharedauth "github.com/e2b-dev/infra/packages/auth/pkg/auth"
 	"github.com/e2b-dev/infra/packages/auth/pkg/types"
 	clickhouse "github.com/e2b-dev/infra/packages/clickhouse/pkg"
@@ -234,6 +235,7 @@ type APIStore struct {
 	accessTokenGenerator      *sandbox.AccessTokenGenerator
 	featureFlags              *featureflags.Client
 	clusters                  *clusters.Pool
+	volumeQuota               *volumequota.Manager
 	snapshotUpsertSem         *sharedutils.AdjustableSemaphore
 	sandboxListSem            *sharedutils.AdjustableSemaphore
 	snapshotBuildQuerySem     *sharedutils.AdjustableSemaphore
@@ -432,7 +434,13 @@ func NewAPIStore(ctx context.Context, tel *telemetry.Client, redisClient redis.U
 		sandboxEvents = webhookevents.NewSandboxEventsServiceClient(webhooksConn)
 	}
 
+	volumeQuota, err := volumequota.New(config.VolumeQuota)
+	if err != nil {
+		logger.L().Fatal(ctx, "Initializing vePFS volume quota manager", zap.Error(err))
+	}
+
 	a := &APIStore{
+		volumeQuota:           volumeQuota,
 		config:                config,
 		orchestrator:          orch,
 		pauseLimiter:          pauseLimiter,

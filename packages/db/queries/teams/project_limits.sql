@@ -39,7 +39,8 @@ SELECT EXISTS (SELECT 1 FROM changed) AS applied;
 -- lookups read in preference to default_limits.
 --
 -- Every column is supplied on every call: the caller sends a complete set, so
--- there is no partial update to merge and no prior row to read first.
+-- there is no partial update to merge and no prior row to read first. The one
+-- exception is volume_quota_gib, which callers may omit (NULL).
 --
 -- max_disk_size_mb and max_free_disk_size_mb are the same ceiling under the old
 -- and the new name, and the table holds them equal. Both are written here so a
@@ -63,6 +64,7 @@ INSERT INTO public.project_limits (
     api_team_rps_list,
     api_team_rps_delete,
     max_secrets,
+    volume_quota_gib,
     updated_at
 ) VALUES (
     sqlc.arg(team_id)::uuid,
@@ -79,6 +81,7 @@ INSERT INTO public.project_limits (
     sqlc.arg(api_team_rps_list)::bigint,
     sqlc.arg(api_team_rps_delete)::bigint,
     sqlc.arg(max_secrets)::bigint,
+    sqlc.narg(volume_quota_gib)::bigint,
     now()
 )
 ON CONFLICT (team_id) DO UPDATE SET
@@ -95,4 +98,6 @@ ON CONFLICT (team_id) DO UPDATE SET
     api_team_rps_list          = EXCLUDED.api_team_rps_list,
     api_team_rps_delete        = EXCLUDED.api_team_rps_delete,
     max_secrets                = EXCLUDED.max_secrets,
+    -- Optional in the push: a delivery that leaves it out keeps the stored one.
+    volume_quota_gib           = COALESCE(EXCLUDED.volume_quota_gib, public.project_limits.volume_quota_gib),
     updated_at                 = now();

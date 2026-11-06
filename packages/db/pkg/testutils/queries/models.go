@@ -101,6 +101,7 @@ type DefaultLimit struct {
 	ApiTeamRpsList           int64
 	ApiTeamRpsDelete         int64
 	MaxSecrets               int64
+	VolumeQuotaGib           int64
 }
 
 type Env struct {
@@ -188,6 +189,7 @@ type ProjectLimit struct {
 	ApiTeamRpsList           int64
 	MaxSecrets               int64
 	ApiTeamRpsDelete         int64
+	VolumeQuotaGib           pgtype.Int8
 }
 
 type ProjectionProjectBlock struct {

@@ -67,7 +67,8 @@ func TestTeamLookupsResolveProjectLimitsElseDefaults(t *testing.T) {
 			max_length_hours = 101, concurrent_sandboxes = 102, concurrent_template_builds = 103,
 			max_vcpu = 104, max_ram_mb = 105, disk_mb = 106, events_ttl_days = 107,
 			default_free_disk_size_mb = 108, max_disk_size_mb = 109,
-			api_team_rps_list = 110, api_team_rps_delete = 111, max_secrets = 112
+			api_team_rps_list = 110, api_team_rps_delete = 111, max_secrets = 112,
+			volume_quota_gib = 113
 	`)
 	require.NoError(t, err)
 	defaults := map[string]int64{
@@ -75,6 +76,7 @@ func TestTeamLookupsResolveProjectLimitsElseDefaults(t *testing.T) {
 		"MaxVcpu": 104, "MaxRamMb": 105, "DiskMb": 106, "EventsTtlDays": 107,
 		"DefaultFreeDiskSizeMb": 108, "MaxDiskSizeMb": 109, "MaxFreeDiskSizeMb": 109,
 		"ApiTeamRpsList": 110, "ApiTeamRpsDelete": 111, "MaxSecrets": 112,
+		"VolumeQuotaGib": 113,
 	}
 
 	unpushed := seedTeam(t, sqlDB, "lookup-unpushed")
@@ -93,8 +95,8 @@ func TestTeamLookupsResolveProjectLimitsElseDefaults(t *testing.T) {
 			team_id, max_length_hours, concurrent_sandboxes, concurrent_template_builds,
 			max_vcpu, max_ram_mb, disk_mb, events_ttl_days,
 			default_free_disk_size_mb, max_disk_size_mb, max_free_disk_size_mb,
-			api_team_rps_list, api_team_rps_delete, max_secrets
-		) VALUES ($1, 1, 2, 3, 4, 5, 6, 7, 8, 9, 1, 0, 11, 12)
+			api_team_rps_list, api_team_rps_delete, max_secrets, volume_quota_gib
+		) VALUES ($1, 1, 2, 3, 4, 5, 6, 7, 8, 9, 1, 0, 11, 12, 13)
 	`, pushed)
 	require.NoError(t, err)
 	pushedLimits := map[string]int64{
@@ -102,6 +104,7 @@ func TestTeamLookupsResolveProjectLimitsElseDefaults(t *testing.T) {
 		"MaxVcpu": 4, "MaxRamMb": 5, "DiskMb": 6, "EventsTtlDays": 7,
 		"DefaultFreeDiskSizeMb": 8, "MaxDiskSizeMb": 9, "MaxFreeDiskSizeMb": 9,
 		"ApiTeamRpsList": 0, "ApiTeamRpsDelete": 11, "MaxSecrets": 12,
+		"VolumeQuotaGib": 13,
 	}
 
 	userID := uuid.New()
@@ -283,7 +286,9 @@ func TestDefaultLimitsMigrationKeepsWhatEveryTeamResolvedTo(t *testing.T) {
 		t.Helper()
 		var row string
 		require.NoError(t, sqlDB.QueryRowContext(ctx,
-			`SELECT to_jsonb(pl)::text FROM public.project_limits pl WHERE team_id = $1`, pushed).Scan(&row))
+			// Columns added by later migrations do not exist before the Up, so
+			// they are left out of the comparison.
+			`SELECT (to_jsonb(pl) - 'volume_quota_gib')::text FROM public.project_limits pl WHERE team_id = $1`, pushed).Scan(&row))
 
 		return row
 	}
@@ -319,7 +324,8 @@ func TestDefaultLimitsMigrationKeepsWhatEveryTeamResolvedTo(t *testing.T) {
 		"max_length_hours": 1, "concurrent_sandboxes": 33, "concurrent_template_builds": 20,
 		"max_vcpu": 3, "max_ram_mb": 8192, "disk_mb": 512, "events_ttl_days": 7,
 		"default_free_disk_size_mb": 512, "max_disk_size_mb": 25600,
-		"api_team_rps_list": 7, "api_team_rps_delete": 9, "max_secrets": 4
+		"api_team_rps_list": 7, "api_team_rps_delete": 9, "max_secrets": 4,
+		"volume_quota_gib": 0
 	}`, defaults, "seeded from the tuned base tier")
 
 	_, err = sqlDB.ExecContext(ctx, `UPDATE public.default_limits SET concurrent_sandboxes = 77`)

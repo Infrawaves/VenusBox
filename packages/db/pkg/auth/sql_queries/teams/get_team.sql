@@ -18,7 +18,8 @@ SELECT sqlc.embed(t),
     COALESCE(pl.max_disk_size_mb, d.max_disk_size_mb) AS max_free_disk_size_mb,
     COALESCE(pl.api_team_rps_list, d.api_team_rps_list) AS api_team_rps_list,
     COALESCE(pl.api_team_rps_delete, d.api_team_rps_delete) AS api_team_rps_delete,
-    COALESCE(pl.max_secrets, d.max_secrets) AS max_secrets
+    COALESCE(pl.max_secrets, d.max_secrets) AS max_secrets,
+    COALESCE(pl.volume_quota_gib, d.volume_quota_gib) AS volume_quota_gib
 FROM "public"."team_api_keys" tak
 JOIN "public"."teams" t ON tak.team_id = t.id
 CROSS JOIN "public"."default_limits" d
@@ -41,7 +42,8 @@ SELECT sqlc.embed(t),
     COALESCE(pl.max_disk_size_mb, d.max_disk_size_mb) AS max_free_disk_size_mb,
     COALESCE(pl.api_team_rps_list, d.api_team_rps_list) AS api_team_rps_list,
     COALESCE(pl.api_team_rps_delete, d.api_team_rps_delete) AS api_team_rps_delete,
-    COALESCE(pl.max_secrets, d.max_secrets) AS max_secrets
+    COALESCE(pl.max_secrets, d.max_secrets) AS max_secrets,
+    COALESCE(pl.volume_quota_gib, d.volume_quota_gib) AS volume_quota_gib
 FROM "public"."teams" t
 JOIN "public"."users_teams" ut ON ut.team_id = t.id
 CROSS JOIN "public"."default_limits" d
@@ -64,7 +66,8 @@ SELECT sqlc.embed(t),
     COALESCE(pl.max_disk_size_mb, d.max_disk_size_mb) AS max_free_disk_size_mb,
     COALESCE(pl.api_team_rps_list, d.api_team_rps_list) AS api_team_rps_list,
     COALESCE(pl.api_team_rps_delete, d.api_team_rps_delete) AS api_team_rps_delete,
-    COALESCE(pl.max_secrets, d.max_secrets) AS max_secrets
+    COALESCE(pl.max_secrets, d.max_secrets) AS max_secrets,
+    COALESCE(pl.volume_quota_gib, d.volume_quota_gib) AS volume_quota_gib
 FROM "public"."teams" t
 CROSS JOIN "public"."default_limits" d
 LEFT JOIN "public"."project_limits" pl ON pl.team_id = t.id
@@ -86,7 +89,8 @@ SELECT sqlc.embed(t), ut.is_default,
     COALESCE(pl.max_disk_size_mb, d.max_disk_size_mb) AS max_free_disk_size_mb,
     COALESCE(pl.api_team_rps_list, d.api_team_rps_list) AS api_team_rps_list,
     COALESCE(pl.api_team_rps_delete, d.api_team_rps_delete) AS api_team_rps_delete,
-    COALESCE(pl.max_secrets, d.max_secrets) AS max_secrets
+    COALESCE(pl.max_secrets, d.max_secrets) AS max_secrets,
+    COALESCE(pl.volume_quota_gib, d.volume_quota_gib) AS volume_quota_gib
 FROM "public"."teams" t
 JOIN "public"."users_teams" ut ON ut.team_id = t.id
 CROSS JOIN "public"."default_limits" d

@@ -626,7 +626,7 @@ user's team list. Volumes, builds and stored artifacts are not reclaimed.
 
 | Store | Owner packages | What lives there |
 |---|---|---|
-| **PostgreSQL** | `packages/db` (goose migrations, sqlc) | Durable control-plane state: `teams`, `users`, `default_limits` (the one row of quota defaults), `project_limits` (per-team quota overrides pushed in by the owning service; the team lookups read it in preference to `default_limits`), `tiers` and `addons` (read for limits only by the legacy `team_limits` view), `envs` (templates), `env_builds` (build rows: vcpu, ram_mb, status, versions), `env_aliases`, `snapshots` (paused sandboxes), `team_api_keys`, `volumes`, `clusters` |
+| **PostgreSQL** | `packages/db` (goose migrations, sqlc) | Durable control-plane state: `teams`, `users`, `default_limits` (the one row of quota defaults, including the team volume quota `volume_quota_gib`), `project_limits` (per-team quota overrides pushed in by the owning service; the team lookups read it in preference to `default_limits`), `tiers` and `addons` (read for limits only by the legacy `team_limits` view), `envs` (templates), `env_builds` (build rows: vcpu, ram_mb, status, versions), `env_aliases`, `snapshots` (paused sandboxes), `team_api_keys`, `volumes`, `clusters` |
 | **Redis** | API, client-proxy, orchestrator | Ephemeral runtime state: running-sandbox store (source of truth), sandbox→node routing catalog, team/template/snapshot caches, rate limiting, P2P chunk peer registry |
 | **ClickHouse** | `packages/clickhouse` | Time-series/analytics: `metrics_gauge`/`metrics_sum` (written by the OTel collector), `sandbox_events`, `sandbox_host_stats` (written by orchestrator), team metrics, and optionally `sandbox_logs` during the log migration. Read by API and dashboard-api |
 | **Object storage** (GCS/S3/local, `packages/shared/pkg/storage`) | orchestrator, template-manager | Template & snapshot artifacts, keyed by build ID: `{buildID}/memfile`, `{buildID}/rootfs.ext4`, `{buildID}/snapfile`, `{buildID}/metadata.json` + `.header` index files |
@@ -962,6 +962,14 @@ sequenceDiagram
   `cfg.VolumesTokenConfig`) signed by the API, scoped to the team and volume, presented as a bearer
   token on every content request. Its `aud` claim is `https://api.<domain>`, so a token minted for
   one cluster's origin is not accepted by another.
+- **Team quota (vePFS).** A team's volumes share one capacity limit, `volume_quota_gib` from the team
+  lookups (`project_limits`, else `default_limits`; 0 = unbounded). For volume types mapped to a vePFS
+  file system (`cfg.VolumeQuotaConfig`, `VEPFS_QUOTA_*`), `POST /volumes` first makes the API call
+  the Volcengine vePFS OpenAPI (`internal/volumequota`): it ensures a fileset at `/team-<id>` — the
+  directory the orchestrator places the team's volumes in, with vePFS mounted at its root — and sets
+  the fileset's capacity quota. The orchestrator is called only after that succeeds, so a volume is
+  never created outside its team's quota; a failure refuses the create with 503. Orchestrators hold
+  no Volcengine credentials.
 
 ### Pause and resume
 

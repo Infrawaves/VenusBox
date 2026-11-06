@@ -110,6 +110,23 @@ func (a *APIStore) PostVolumes(c *gin.Context) {
 		VolumeType: volumeType,
 	}
 
+	// The team's quota fileset has to exist before the orchestrator creates the
+	// team's directory under it, and a volume that would land outside the
+	// quota is refused rather than created unbounded.
+	if a.volumeQuota.Manages(volume.VolumeType) {
+		var quotaGiB int64
+		if team.Limits != nil {
+			quotaGiB = team.Limits.VolumeQuotaGiB
+		}
+
+		if err := a.volumeQuota.EnsureTeamQuota(ctx, volume.VolumeType, team.ID, quotaGiB); err != nil {
+			a.sendAPIStoreError(c, http.StatusServiceUnavailable, "Error when applying the team's volume quota")
+			telemetry.ReportCriticalError(ctx, "error when applying team volume quota", err)
+
+			return
+		}
+	}
+
 	response, err := a.createVolume(ctx, clusterID, volume)
 	if err != nil {
 		if errors.Is(err, ErrClusterNotFound) {

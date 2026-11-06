@@ -1263,6 +1263,14 @@ components:
           format: int32
           minimum: 1
           description: Live secrets the project may hold.
+        volume_quota_gib:
+          type: integer
+          format: int64
+          minimum: 0
+          description: >-
+            GiB that all of the project's persistent volumes may hold together.
+            Zero leaves them unbounded. Optional: a push without it keeps the
+            value already stored, else the deployment default.
         decided_at:
           $ref: "#/components/schemas/ManagementDecidedAt"
 

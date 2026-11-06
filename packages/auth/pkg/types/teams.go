@@ -34,6 +34,8 @@ func newTeamLimits(
 		MaxFreeDiskSizeMb:     row.MaxFreeDiskSizeMb,
 
 		MaxSecrets: row.MaxSecrets,
+
+		VolumeQuotaGiB: row.VolumeQuotaGib,
 	}
 }
 

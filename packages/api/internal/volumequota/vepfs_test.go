@@ -1,0 +1,275 @@
+package volumequota
+
+import (
+	"errors"
+	"math"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"github.com/volcengine/volcengine-go-sdk/service/vepfs"
+	"github.com/volcengine/volcengine-go-sdk/volcengine"
+	"github.com/volcengine/volcengine-go-sdk/volcengine/request"
+
+	"github.com/e2b-dev/infra/packages/api/internal/cfg"
+)
+
+const (
+	testVolumeType   = "vepfs"
+	testFileSystemID = "vepfs-test"
+)
+
+// fakeVePFS keeps filesets in memory. A created fileset reports Creating on
+// the first describe and Running afterwards, as vePFS does.
+type fakeVePFS struct {
+	mu sync.Mutex
+
+	filesets  map[string]*vepfs.FilesetForDescribeFilesetsOutput // by path
+	describes map[string]int                                      // by path, after creation
+
+	createErr error
+	quotaErr  error
+
+	creates   int
+	quotaSets []int32
+}
+
+func newFake() *fakeVePFS {
+	return &fakeVePFS{
+		filesets:  map[string]*vepfs.FilesetForDescribeFilesetsOutput{},
+		describes: map[string]int{},
+	}
+}
+
+func (f *fakeVePFS) DescribeFilesetsWithContext(_ volcengine.Context, in *vepfs.DescribeFilesetsInput, _ ...request.Option) (*vepfs.DescribeFilesetsOutput, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	path := volcengine.StringValue(in.Filters[0].Value)
+	fileset, ok := f.filesets[path]
+	if !ok {
+		return &vepfs.DescribeFilesetsOutput{}, nil
+	}
+
+	f.describes[path]++
+	if f.describes[path] > 1 && volcengine.StringValue(fileset.Status) == vepfs.EnumOfStatusForDescribeFilesetsOutputCreating {
+		fileset.Status = volcengine.String(vepfs.EnumOfStatusForDescribeFilesetsOutputRunning)
+	}
+
+	copied := *fileset
+
+	return &vepfs.DescribeFilesetsOutput{Filesets: []*vepfs.FilesetForDescribeFilesetsOutput{&copied}}, nil
+}
+
+func (f *fakeVePFS) CreateFilesetWithContext(_ volcengine.Context, in *vepfs.CreateFilesetInput, _ ...request.Option) (*vepfs.CreateFilesetOutput, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	f.creates++
+	if f.createErr != nil {
+		return nil, f.createErr
+	}
+
+	path := volcengine.StringValue(in.FilesetPath)
+	if _, ok := f.filesets[path]; ok {
+		return nil, errors.New("fileset already exists")
+	}
+
+	id := "fs-" + uuid.NewString()
+	f.filesets[path] = &vepfs.FilesetForDescribeFilesetsOutput{
+		FilesetId:    volcengine.String(id),
+		FilesetName:  in.FilesetName,
+		FilesetPath:  in.FilesetPath,
+		FileSystemId: in.FileSystemId,
+		Status:       volcengine.String(vepfs.EnumOfStatusForDescribeFilesetsOutputCreating),
+	}
+
+	return &vepfs.CreateFilesetOutput{FilesetId: volcengine.String(id)}, nil
+}
+
+func (f *fakeVePFS) SetFilesetQuotaWithContext(_ volcengine.Context, in *vepfs.SetFilesetQuotaInput, _ ...request.Option) (*vepfs.SetFilesetQuotaOutput, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if f.quotaErr != nil {
+		return nil, f.quotaErr
+	}
+
+	for _, fileset := range f.filesets {
+		if volcengine.StringValue(fileset.FilesetId) == volcengine.StringValue(in.FilesetId) {
+			fileset.CapacityLimit = in.CapacityLimit
+			f.quotaSets = append(f.quotaSets, volcengine.Int32Value(in.CapacityLimit))
+
+			return &vepfs.SetFilesetQuotaOutput{}, nil
+		}
+	}
+
+	return nil, errors.New("fileset not found")
+}
+
+func (f *fakeVePFS) limitAt(path string) int32 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if fileset, ok := f.filesets[path]; ok {
+		return volcengine.Int32Value(fileset.CapacityLimit)
+	}
+
+	return -1
+}
+
+func testManager(api filesetAPI) *Manager {
+	m := newManager(api, map[string]string{testVolumeType: testFileSystemID})
+	m.settleInterval = time.Millisecond
+	m.settleTimeout = time.Second
+
+	return m
+}
+
+func TestEnsureTeamQuotaCreatesFilesetAndSetsQuota(t *testing.T) {
+	t.Parallel()
+
+	fake := newFake()
+	m := testManager(fake)
+	teamID := uuid.New()
+
+	require.NoError(t, m.EnsureTeamQuota(t.Context(), testVolumeType, teamID, 100))
+
+	assert.Equal(t, 1, fake.creates)
+	assert.Equal(t, int32(100), fake.limitAt("/team-"+teamID.String()))
+	assert.Equal(t, "team-"+teamID.String(), volcengine.StringValue(fake.filesets["/team-"+teamID.String()].FilesetName))
+}
+
+func TestEnsureTeamQuotaIsIdempotentAndFollowsLimitChanges(t *testing.T) {
+	t.Parallel()
+
+	fake := newFake()
+	m := testManager(fake)
+	teamID := uuid.New()
+
+	require.NoError(t, m.EnsureTeamQuota(t.Context(), testVolumeType, teamID, 100))
+	require.NoError(t, m.EnsureTeamQuota(t.Context(), testVolumeType, teamID, 100))
+	assert.Equal(t, 1, fake.creates, "an existing fileset is reused")
+	assert.Equal(t, []int32{100}, fake.quotaSets, "an unchanged limit is not set again")
+
+	require.NoError(t, m.EnsureTeamQuota(t.Context(), testVolumeType, teamID, 250))
+	assert.Equal(t, 1, fake.creates)
+	assert.Equal(t, int32(250), fake.limitAt("/team-"+teamID.String()))
+}
+
+func TestEnsureTeamQuotaSkipsUnboundedAndUnmanaged(t *testing.T) {
+	t.Parallel()
+
+	fake := newFake()
+	m := testManager(fake)
+
+	require.NoError(t, m.EnsureTeamQuota(t.Context(), testVolumeType, uuid.New(), 0))
+	require.NoError(t, m.EnsureTeamQuota(t.Context(), "nfs", uuid.New(), 100))
+	assert.Zero(t, fake.creates)
+	assert.False(t, m.Manages("nfs"))
+	assert.True(t, m.Manages(testVolumeType))
+
+	var nilManager *Manager
+	assert.False(t, nilManager.Manages(testVolumeType))
+	require.NoError(t, nilManager.EnsureTeamQuota(t.Context(), testVolumeType, uuid.New(), 100))
+}
+
+func TestEnsureTeamQuotaRejectsTooLargeQuota(t *testing.T) {
+	t.Parallel()
+
+	fake := newFake()
+	m := testManager(fake)
+
+	err := m.EnsureTeamQuota(t.Context(), testVolumeType, uuid.New(), math.MaxInt32+1)
+	require.ErrorIs(t, err, ErrQuotaTooLarge)
+	assert.Zero(t, fake.creates)
+}
+
+func TestEnsureTeamQuotaAdoptsFilesetCreatedConcurrently(t *testing.T) {
+	t.Parallel()
+
+	fake := newFake()
+	m := testManager(fake)
+	teamID := uuid.New()
+	path := "/team-" + teamID.String()
+
+	// Another replica created it between this one's lookup and create.
+	fake.filesets[path] = &vepfs.FilesetForDescribeFilesetsOutput{
+		FilesetId:   volcengine.String("fs-other"),
+		FilesetPath: volcengine.String(path),
+		Status:      volcengine.String(vepfs.EnumOfStatusForDescribeFilesetsOutputRunning),
+	}
+	id, err := m.createFileset(t.Context(), testFileSystemID, teamID, path)
+	require.NoError(t, err)
+	assert.Equal(t, "fs-other", id)
+}
+
+func TestEnsureTeamQuotaConcurrentCreatesMakeOneFileset(t *testing.T) {
+	t.Parallel()
+
+	fake := newFake()
+	m := testManager(fake)
+	teamID := uuid.New()
+
+	var wg sync.WaitGroup
+	errs := make([]error, 8)
+	for i := range errs {
+		wg.Go(func() {
+			errs[i] = m.EnsureTeamQuota(t.Context(), testVolumeType, teamID, 10)
+		})
+	}
+	wg.Wait()
+
+	for _, err := range errs {
+		require.NoError(t, err)
+	}
+	assert.Equal(t, 1, fake.creates)
+}
+
+func TestEnsureTeamQuotaReportsFailures(t *testing.T) {
+	t.Parallel()
+
+	t.Run("create", func(t *testing.T) {
+		t.Parallel()
+
+		fake := newFake()
+		fake.createErr = errors.New("boom")
+		err := testManager(fake).EnsureTeamQuota(t.Context(), testVolumeType, uuid.New(), 10)
+		require.ErrorContains(t, err, "boom")
+	})
+
+	t.Run("quota", func(t *testing.T) {
+		t.Parallel()
+
+		fake := newFake()
+		fake.quotaErr = errors.New("denied")
+		err := testManager(fake).EnsureTeamQuota(t.Context(), testVolumeType, uuid.New(), 10)
+		require.ErrorContains(t, err, "denied")
+	})
+
+	t.Run("error state", func(t *testing.T) {
+		t.Parallel()
+
+		fake := newFake()
+		teamID := uuid.New()
+		path := "/team-" + teamID.String()
+		fake.filesets[path] = &vepfs.FilesetForDescribeFilesetsOutput{
+			FilesetId:   volcengine.String("fs-broken"),
+			FilesetPath: volcengine.String(path),
+			Status:      volcengine.String(vepfs.EnumOfStatusForDescribeFilesetsOutputCreateError),
+		}
+		err := testManager(fake).EnsureTeamQuota(t.Context(), testVolumeType, teamID, 10)
+		require.ErrorContains(t, err, "CreateError")
+	})
+}
+
+func TestNewWithoutFileSystemsIsNil(t *testing.T) {
+	t.Parallel()
+
+	m, err := New(cfg.VolumeQuotaConfig{})
+	require.NoError(t, err)
+	assert.Nil(t, m)
+}

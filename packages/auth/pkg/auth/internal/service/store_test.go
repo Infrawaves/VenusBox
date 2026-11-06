@@ -35,12 +35,14 @@ func TestAuthStoreResolvesTeamAndLimitsInOneStatement(t *testing.T) {
 			max_length_hours = 101, concurrent_sandboxes = 102, concurrent_template_builds = 103,
 			max_vcpu = 104, max_ram_mb = 105, disk_mb = 106, events_ttl_days = 107,
 			default_free_disk_size_mb = 108, max_disk_size_mb = 109,
-			api_team_rps_list = 110, api_team_rps_delete = 111, max_secrets = 112`))
+			api_team_rps_list = 110, api_team_rps_delete = 111, max_secrets = 112,
+			volume_quota_gib = 113`))
 	defaults := &types.TeamLimits{
 		MaxLengthHours: 101, SandboxConcurrency: 102, BuildConcurrency: 103,
 		MaxVcpu: 104, MaxRamMb: 105, DiskMb: 106, EventsTTLDays: 107,
 		DefaultFreeDiskSizeMb: 108, MaxFreeDiskSizeMb: 109,
 		APITeamRPSList: 110, APITeamRPSDelete: 111, MaxSecrets: 112,
+		VolumeQuotaGiB: 113,
 	}
 
 	unpushed := testutils.CreateTestTeam(t, db)
@@ -59,6 +61,8 @@ func TestAuthStoreResolvesTeamAndLimitsInOneStatement(t *testing.T) {
 		MaxVcpu: 4, MaxRamMb: 5, DiskMb: 6, EventsTTLDays: 7,
 		DefaultFreeDiskSizeMb: 8, MaxFreeDiskSizeMb: 9,
 		APITeamRPSList: 10, APITeamRPSDelete: 11, MaxSecrets: 12,
+		// Not pushed, so it falls back to default_limits.
+		VolumeQuotaGiB: 113,
 	}
 
 	const keyHash = "store-test-key-hash"

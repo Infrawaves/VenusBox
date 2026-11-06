@@ -51,5 +51,6 @@ func teamRow(row authqueries.GetUserTeamsWithLimitsRow) authqueries.GetTeamByTea
 		ApiTeamRpsList:                   row.ApiTeamRpsList,
 		ApiTeamRpsDelete:                 row.ApiTeamRpsDelete,
 		MaxSecrets:                       row.MaxSecrets,
+		VolumeQuotaGib:                   row.VolumeQuotaGib,
 	}
 }
