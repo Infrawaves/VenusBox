@@ -17,13 +17,20 @@
 -- a template soft-delete can clear every edge it ever produced in one pass
 -- without re-querying env_builds/env_build_assignments for build history.
 -- Empty when the uploader had no template_id in objectMetadata (dev tooling).
+--
+-- env_last_spawned_at is a one-time snapshot of envs.last_spawned_at taken
+-- when the edge was recorded — informational only, for eyeballing "was this
+-- template recently used" while inspecting the table. It does not track
+-- envs.last_spawned_at going forward and plays no part in the ref_count
+-- +1/-1 logic or any deletion decision.
 CREATE TABLE IF NOT EXISTS tos_build_edges (
-    build_id      uuid NOT NULL,
-    ancestor_id   uuid NOT NULL,
-    env_id        text NOT NULL DEFAULT '',
-    source        text NOT NULL,
-    recorded_at   timestamptz NOT NULL DEFAULT now(),
-    deleted_at    timestamptz,
+    build_id             uuid NOT NULL,
+    ancestor_id          uuid NOT NULL,
+    env_id               text NOT NULL DEFAULT '',
+    env_last_spawned_at  timestamptz,
+    source               text NOT NULL,
+    recorded_at          timestamptz NOT NULL DEFAULT now(),
+    deleted_at           timestamptz,
     PRIMARY KEY (build_id, ancestor_id)
 );
 

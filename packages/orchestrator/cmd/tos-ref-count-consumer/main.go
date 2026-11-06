@@ -164,14 +164,19 @@ func applyUploadEvent(ctx context.Context, pool *pgxpool.Pool, buildID uuid.UUID
 		return fmt.Errorf("register build %s in reference count table: %w", buildID, err)
 	}
 
+	// Informational-only snapshot (see schema.sql) — a lookup failure here
+	// must not fail the whole event, so errors are swallowed to a nil
+	// timestamp rather than propagated.
+	envLastSpawnedAt := lookupEnvLastSpawnedAt(ctx, tx, envID)
+
 	for _, ancestorID := range ancestorIDs {
 		var inserted bool
 		err := tx.QueryRow(ctx, `
-			INSERT INTO tos_build_edges (build_id, ancestor_id, env_id, source)
-			VALUES ($1, $2, $3, 'live_upload')
+			INSERT INTO tos_build_edges (build_id, ancestor_id, env_id, env_last_spawned_at, source)
+			VALUES ($1, $2, $3, $4, 'live_upload')
 			ON CONFLICT (build_id, ancestor_id) DO NOTHING
 			RETURNING true
-		`, buildID, ancestorID, envID).Scan(&inserted)
+		`, buildID, ancestorID, envID, envLastSpawnedAt).Scan(&inserted)
 
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
@@ -202,6 +207,28 @@ func applyUploadEvent(ctx context.Context, pool *pgxpool.Pool, buildID uuid.UUID
 	log.Printf("build=%s file_type=%s ancestors=%d edges processed", buildID, fileType, len(ancestorIDs))
 
 	return nil
+}
+
+// lookupEnvLastSpawnedAt reads envs.last_spawned_at for envID, for the
+// informational snapshot stored on the edge (see schema.sql). Returns nil on
+// any failure to look it up (empty envID, no matching row, or a query
+// error) — this is a best-effort display field, not load-bearing for any
+// ref_count logic, so a lookup problem here must never fail the edge write.
+func lookupEnvLastSpawnedAt(ctx context.Context, tx pgx.Tx, envID string) *time.Time {
+	if envID == "" {
+		return nil
+	}
+
+	var lastSpawnedAt *time.Time
+	if err := tx.QueryRow(ctx, `SELECT last_spawned_at FROM envs WHERE id = $1`, envID).Scan(&lastSpawnedAt); err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			log.Printf("lookup last_spawned_at for env %s failed (informational field only): %s", envID, err)
+		}
+
+		return nil
+	}
+
+	return lastSpawnedAt
 }
 
 func getenv(key, fallback string) string {
