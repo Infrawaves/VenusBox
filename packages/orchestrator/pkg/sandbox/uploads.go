@@ -279,13 +279,30 @@ type tosLayerEvent struct {
 // the build itself — the header is already durably in TOS by the time this
 // is called.
 //
+// Every origin is published except the intermediate per-step cache layers
+// produced inside a single template build's pipeline (buildOrigin ==
+// ObjectOriginTemplateBuildCache) — pause snapshots, snapshot templates, and
+// the final template build layer all still get an event. Each intermediate
+// cache layer's Mapping.Builds() already contains the full ancestor chain
+// down to the base image, so publishing from every one of them would record
+// the same chain once per layer — e.g. a 5-layer build would write
+// 1+2+3+4+5 duplicate edges instead of the 5 edges the final layer alone
+// already captures. Skipping just the intermediate layers keeps one edge
+// set per build and keeps ref_count meaning "how many templates still
+// depend on this layer", not "how many layers of this one build happened to
+// depend on this layer".
+//
 // envID is the template this build belongs to (storage.ObjectMetadataTemplateID
 // from the caller's objectMetadata — same string as envs.id/env_builds.env_id),
 // carried on the edge so a later template soft-delete can clear every edge
 // this template ever produced in one pass, without re-querying
 // env_builds/env_build_assignments for its build history.
-func (u *Uploads) publishTOSLayerEvent(ctx context.Context, buildID uuid.UUID, envID string, fileType build.DiffType, mapping header.Mapping) {
+func (u *Uploads) publishTOSLayerEvent(ctx context.Context, buildID uuid.UUID, envID string, fileType build.DiffType, mapping header.Mapping, buildOrigin storage.ObjectOrigin) {
 	if u.redis == nil {
+		return
+	}
+
+	if buildOrigin == storage.ObjectOriginTemplateBuildCache {
 		return
 	}
 

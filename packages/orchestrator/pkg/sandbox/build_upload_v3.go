@@ -147,7 +147,7 @@ func (u *Upload) runV3(ctx context.Context) error {
 			return err
 		}
 		if u.uploads != nil {
-			u.uploads.publishTOSLayerEvent(ctx, u.buildID, u.objectMetadata[storage.ObjectMetadataTemplateID], build.Memfile, memfileDiffHeader.Mapping)
+			u.uploads.publishTOSLayerEvent(ctx, u.buildID, u.objectMetadata[storage.ObjectMetadataTemplateID], build.Memfile, memfileDiffHeader.Mapping, storage.ObjectOrigin(u.objectMetadata[storage.ObjectMetadataBuildOrigin]))
 		}
 	}
 	if h := finalizeV3(memfileDiffHeader); h != nil {
@@ -161,7 +161,7 @@ func (u *Upload) runV3(ctx context.Context) error {
 			return err
 		}
 		if u.uploads != nil {
-			u.uploads.publishTOSLayerEvent(ctx, u.buildID, u.objectMetadata[storage.ObjectMetadataTemplateID], build.Rootfs, rootfsDiffHeader.Mapping)
+			u.uploads.publishTOSLayerEvent(ctx, u.buildID, u.objectMetadata[storage.ObjectMetadataTemplateID], build.Rootfs, rootfsDiffHeader.Mapping, storage.ObjectOrigin(u.objectMetadata[storage.ObjectMetadataBuildOrigin]))
 		}
 	}
 	if h := finalizeV3(rootfsDiffHeader); h != nil {
