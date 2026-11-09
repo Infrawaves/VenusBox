@@ -953,7 +953,7 @@ sequenceDiagram
 ```
 
 - **Domain selection.** The token's audience and the content host are the same origin,
-  `https://api.<domain>`. For teams on a **custom (BYOC) cluster** (`team.ClusterID` set), the API
+  `https://api.<domain>`. For teams on a **custom (BYOC) cluster** (`team.ClusterID` set to a cluster other than the local one, the zero UUID), the API
   returns that cluster's domain (`cluster.SandboxDomain`, resolved in
   `handlers.volumeContentDomain`) so content traffic goes to the BYOC cluster's edge instead of the
   control-plane host. For teams on the default cluster the response omits `domain` and the SDK uses
