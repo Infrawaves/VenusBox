@@ -216,7 +216,7 @@ func (a *APIStore) getVolumeType(ctx context.Context, team *types.Team) string {
 		return volumeType
 	}
 
-	if team != nil && team.ClusterID != nil {
+	if usesCustomCluster(team) {
 		return a.config.PlaceholderPersistentVolumeType
 	}
 
