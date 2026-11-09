@@ -139,8 +139,30 @@ func TestEnsureTeamQuotaCreatesFilesetAndSetsQuota(t *testing.T) {
 	require.NoError(t, m.EnsureTeamQuota(t.Context(), testVolumeType, teamID, 100))
 
 	assert.Equal(t, 1, fake.creates)
-	assert.Equal(t, int32(100), fake.limitAt("/team-"+teamID.String()))
-	assert.Equal(t, "team-"+teamID.String(), volcengine.StringValue(fake.filesets["/team-"+teamID.String()].FilesetName))
+	path := "/team-" + teamID.String() + "/"
+	assert.Equal(t, path, TeamPath(teamID), "vePFS requires a leading and trailing slash")
+	assert.Equal(t, int32(100), fake.limitAt(path))
+	assert.Equal(t, "team-"+teamID.String(), volcengine.StringValue(fake.filesets[path].FilesetName))
+}
+
+// A fileset made in the console may be reported without the trailing slash;
+// it is still the team's, so it is adopted rather than created again.
+func TestEnsureTeamQuotaAdoptsFilesetWithoutTrailingSlash(t *testing.T) {
+	t.Parallel()
+
+	fake := newFake()
+	m := testManager(fake)
+	teamID := uuid.New()
+	bare := "/team-" + teamID.String()
+	fake.filesets[bare] = &vepfs.FilesetForDescribeFilesetsOutput{
+		FilesetId:   volcengine.String("fs-console"),
+		FilesetPath: volcengine.String(bare),
+		Status:      volcengine.String(vepfs.EnumOfStatusForDescribeFilesetsOutputRunning),
+	}
+
+	require.NoError(t, m.EnsureTeamQuota(t.Context(), testVolumeType, teamID, 10))
+	assert.Zero(t, fake.creates, "the console fileset is adopted")
+	assert.Equal(t, int32(10), fake.limitAt(bare))
 }
 
 func TestEnsureTeamQuotaIsIdempotentAndFollowsLimitChanges(t *testing.T) {
@@ -157,7 +179,7 @@ func TestEnsureTeamQuotaIsIdempotentAndFollowsLimitChanges(t *testing.T) {
 
 	require.NoError(t, m.EnsureTeamQuota(t.Context(), testVolumeType, teamID, 250))
 	assert.Equal(t, 1, fake.creates)
-	assert.Equal(t, int32(250), fake.limitAt("/team-"+teamID.String()))
+	assert.Equal(t, int32(250), fake.limitAt(TeamPath(teamID)))
 }
 
 func TestEnsureTeamQuotaSkipsUnboundedAndUnmanaged(t *testing.T) {
@@ -194,7 +216,7 @@ func TestEnsureTeamQuotaAdoptsFilesetCreatedConcurrently(t *testing.T) {
 	fake := newFake()
 	m := testManager(fake)
 	teamID := uuid.New()
-	path := "/team-" + teamID.String()
+	path := TeamPath(teamID)
 
 	// Another replica created it between this one's lookup and create.
 	fake.filesets[path] = &vepfs.FilesetForDescribeFilesetsOutput{
@@ -255,7 +277,7 @@ func TestEnsureTeamQuotaReportsFailures(t *testing.T) {
 
 		fake := newFake()
 		teamID := uuid.New()
-		path := "/team-" + teamID.String()
+		path := TeamPath(teamID)
 		fake.filesets[path] = &vepfs.FilesetForDescribeFilesetsOutput{
 			FilesetId:   volcengine.String("fs-broken"),
 			FilesetPath: volcengine.String(path),

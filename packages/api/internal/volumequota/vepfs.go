@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"sync"
 	"time"
 
@@ -101,9 +102,17 @@ func (m *Manager) Manages(volumeType string) bool {
 }
 
 // TeamPath is the fileset path of a team, relative to the file system root.
-// It mirrors chrooted.Builder.BuildVolumePath in the orchestrator.
+// It mirrors chrooted.Builder.BuildVolumePath in the orchestrator. vePFS
+// requires a fileset path to start and end with "/" and refuses one without the
+// trailing slash as InvalidParameter.FilesetPath.
 func TeamPath(teamID uuid.UUID) string {
-	return fmt.Sprintf("/team-%s", teamID)
+	return fmt.Sprintf("/team-%s/", teamID)
+}
+
+// samePath compares fileset paths ignoring a trailing slash, since vePFS may
+// report a fileset created in the console without one.
+func samePath(a, b string) bool {
+	return strings.TrimSuffix(a, "/") == strings.TrimSuffix(b, "/")
 }
 
 // EnsureTeamQuota makes the team's fileset on the file system behind
@@ -202,25 +211,38 @@ func (m *Manager) createFileset(ctx context.Context, fileSystemID string, teamID
 	return volcengine.StringValue(out.FilesetId), nil
 }
 
-// findFileset returns the live fileset at path, or nil when there is none.
+// findFileset returns the live fileset at path, or nil when there is none. It
+// looks the path up with and without its trailing slash, since a fileset made
+// in the console may be stored either way.
 func (m *Manager) findFileset(ctx context.Context, fileSystemID, path string) (*vepfs.FilesetForDescribeFilesetsOutput, error) {
+	for _, spelling := range []string{path, strings.TrimSuffix(path, "/")} {
+		fileset, err := m.findFilesetSpelled(ctx, fileSystemID, path, spelling)
+		if err != nil || fileset != nil {
+			return fileset, err
+		}
+	}
+
+	return nil, nil
+}
+
+func (m *Manager) findFilesetSpelled(ctx context.Context, fileSystemID, path, spelling string) (*vepfs.FilesetForDescribeFilesetsOutput, error) {
 	out, err := m.api.DescribeFilesetsWithContext(ctx, &vepfs.DescribeFilesetsInput{
 		FileSystemId: volcengine.String(fileSystemID),
 		Filters: []*vepfs.FilterForDescribeFilesetsInput{{
 			Key:   volcengine.String(vepfs.EnumOfKeyForDescribeFilesetsInputFilesetPath),
-			Value: volcengine.String(path),
+			Value: volcengine.String(spelling),
 		}},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("describing vePFS filesets of %s at %s: %w", fileSystemID, path, err)
+		return nil, fmt.Errorf("describing vePFS filesets of %s at %s: %w", fileSystemID, spelling, err)
 	}
 	if out == nil {
 		return nil, nil
 	}
 
 	for _, fileset := range out.Filesets {
-		if fileset == nil || volcengine.StringValue(fileset.FilesetPath) != path {
-			// The filter may match by prefix; only the exact path is the team's.
+		if fileset == nil || !samePath(volcengine.StringValue(fileset.FilesetPath), path) {
+			// The filter may match by prefix; only the team's own path counts.
 			continue
 		}
 

@@ -965,7 +965,7 @@ sequenceDiagram
 - **Team quota (vePFS).** A team's volumes share one capacity limit, `volume_quota_gib` from the team
   lookups (`project_limits`, else `default_limits`; 0 = unbounded). For volume types mapped to a vePFS
   file system (`cfg.VolumeQuotaConfig`, `VEPFS_QUOTA_*`), `POST /volumes` first makes the API call
-  the Volcengine vePFS OpenAPI (`internal/volumequota`): it ensures a fileset at `/team-<id>` — the
+  the Volcengine vePFS OpenAPI (`internal/volumequota`): it ensures a fileset at `/team-<id>/` — the
   directory the orchestrator places the team's volumes in, with vePFS mounted at its root — and sets
   the fileset's capacity quota. The orchestrator is called only after that succeeds, so a volume is
   never created outside its team's quota; a failure refuses the create with 503. Orchestrators hold
