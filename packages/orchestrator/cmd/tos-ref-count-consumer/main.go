@@ -121,14 +121,18 @@ func handleEvent(ctx context.Context, pool *pgxpool.Pool, payload string) error 
 		return fmt.Errorf("parse build_id %q: %w", event.BuildID, err)
 	}
 
+	// A header's own entry in Mapping.Builds() (buildID appearing in its own
+	// ancestor list) is kept, not filtered out — this is the self-reference
+	// edge that makes ref_count=0 mean "this template's env was soft-deleted"
+	// rather than just "no other build depends on it yet". See the design
+	// doc's route B: the self-edge is cleared only by applyTemplateSoftDelete
+	// (keyed on env_id), so it can never reach zero while the template is
+	// still alive — there's no path that decrements it except that one.
 	ancestorIDs := make([]uuid.UUID, 0, len(event.AncestorIDs))
 	for _, s := range event.AncestorIDs {
 		id, err := uuid.Parse(s)
 		if err != nil {
 			return fmt.Errorf("parse ancestor_id %q: %w", s, err)
-		}
-		if id == buildID {
-			continue // a header's own entry in Mapping.Builds() is not an ancestor
 		}
 		ancestorIDs = append(ancestorIDs, id)
 	}
@@ -149,6 +153,14 @@ func handleEvent(ctx context.Context, pool *pgxpool.Pool, payload string) error 
 // this is what makes the +1 tolerant of the same event being processed more
 // than once (not a concern for this List-based dev run, but kept correct for
 // when this logic moves onto a redelivering queue).
+//
+// Route B (self-reference): ancestorIDs includes buildID itself (handleEvent
+// no longer filters it out), so the loop below inserts a (buildID, buildID)
+// edge like any other, bumping its own ref_count from 0 to 1 on first
+// insert. The standalone zero-row insert that used to run here before the
+// loop is now redundant for any build whose Mapping.Builds() is non-empty
+// (every real build's own entry, per header.go) — kept as a defensive
+// no-op (ON CONFLICT DO NOTHING) in case ancestorIDs is ever empty.
 func applyUploadEvent(ctx context.Context, pool *pgxpool.Pool, buildID uuid.UUID, envID string, fileType string, ancestorIDs []uuid.UUID) error {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
