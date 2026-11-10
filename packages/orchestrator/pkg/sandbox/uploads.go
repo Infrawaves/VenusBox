@@ -308,6 +308,15 @@ func (u *Uploads) tosLayerRefCountEventsEnabled(ctx context.Context) bool {
 }
 
 func (u *Uploads) publishTOSLayerEvent(ctx context.Context, buildID uuid.UUID, envID string, fileType build.DiffType, mapping header.Mapping, buildOrigin storage.ObjectOrigin) {
+	// TEMPORARY DEBUG: tracing missing memfile tos-ref-count self-reference
+	// edge for ObjectOriginSnapshotTemplate builds. Remove once root-caused.
+	logger.L().Info(ctx, "tos-ref-count DEBUG: publishTOSLayerEvent entered",
+		logger.WithBuildID(buildID.String()),
+		zap.String("file_type", string(fileType)),
+		zap.String("build_origin", string(buildOrigin)),
+		zap.Bool("redis_nil", u.redis == nil),
+	)
+
 	if u.redis == nil {
 		return
 	}
@@ -317,6 +326,11 @@ func (u *Uploads) publishTOSLayerEvent(ctx context.Context, buildID uuid.UUID, e
 	}
 
 	if !u.tosLayerRefCountEventsEnabled(ctx) {
+		logger.L().Info(ctx, "tos-ref-count DEBUG: publishTOSLayerEvent skipped by flag",
+			logger.WithBuildID(buildID.String()),
+			zap.String("file_type", string(fileType)),
+		)
+
 		return
 	}
 
@@ -343,7 +357,15 @@ func (u *Uploads) publishTOSLayerEvent(ctx context.Context, buildID uuid.UUID, e
 		return
 	}
 
-	if err := u.redis.LPush(ctx, tosLayerEventsListKey, payload).Err(); err != nil {
+	lpushErr := u.redis.LPush(ctx, tosLayerEventsListKey, payload).Err()
+	// TEMPORARY DEBUG: tracing missing memfile tos-ref-count self-reference
+	// edge for ObjectOriginSnapshotTemplate builds. Remove once root-caused.
+	logger.L().Info(ctx, "tos-ref-count DEBUG: lpush result",
+		logger.WithBuildID(buildID.String()),
+		zap.String("file_type", string(fileType)),
+		zap.Bool("lpush_err_nil", lpushErr == nil),
+	)
+	if err := lpushErr; err != nil {
 		logger.L().Warn(ctx, "failed to publish tos layer event",
 			logger.WithBuildID(buildID.String()),
 			zap.String("file_type", string(fileType)),
