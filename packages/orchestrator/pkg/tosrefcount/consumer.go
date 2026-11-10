@@ -91,6 +91,10 @@ func (c *Consumer) ConsumeEvents(ctx context.Context, rdb redis.UniversalClient)
 			continue
 		}
 
+		// TEMPORARY DEBUG: tracing missing memfile tos-ref-count self-reference
+		// edge for ObjectOriginSnapshotTemplate builds. Remove once root-caused.
+		logger.L().Info(ctx, "tos-ref-count DEBUG: brpop popped raw payload", zap.String("raw_payload", res[1]))
+
 		// res[0] is the key name, res[1] is the popped value.
 		if err := c.HandleEvent(ctx, res[1]); err != nil {
 			logger.L().Warn(ctx, "tos-ref-count: handle event failed, dropping", zap.Error(err))
