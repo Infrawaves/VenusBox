@@ -297,12 +297,26 @@ type tosLayerEvent struct {
 // carried on the edge so a later template soft-delete can clear every edge
 // this template ever produced in one pass, without re-querying
 // env_builds/env_build_assignments for its build history.
+// tosLayerRefCountEventsEnabled reads TOSLayerRefCountEventsFlag at the
+// publish it decides; a nil client resolves to the flag's fallback (on).
+func (u *Uploads) tosLayerRefCountEventsEnabled(ctx context.Context) bool {
+	if u.ff == nil {
+		return featureflags.TOSLayerRefCountEventsFlag.Fallback()
+	}
+
+	return u.ff.BoolFlag(ctx, featureflags.TOSLayerRefCountEventsFlag)
+}
+
 func (u *Uploads) publishTOSLayerEvent(ctx context.Context, buildID uuid.UUID, envID string, fileType build.DiffType, mapping header.Mapping, buildOrigin storage.ObjectOrigin) {
 	if u.redis == nil {
 		return
 	}
 
 	if buildOrigin == storage.ObjectOriginTemplateBuildCache {
+		return
+	}
+
+	if !u.tosLayerRefCountEventsEnabled(ctx) {
 		return
 	}
 
