@@ -6,6 +6,11 @@
 -- migration.
 --
 -- Run with: psql "$POSTGRES_CONNECTION_STRING" -f schema.sql
+--
+-- If tos_build_edges already exists from before env_last_spawned_at was
+-- replaced by the tos_build_edges_with_env view below, drop the now-unused
+-- column once:
+--   ALTER TABLE tos_build_edges DROP COLUMN IF EXISTS env_last_spawned_at;
 
 -- Table 1: edges. Records "build_id depends on ancestor_id", one row per
 -- dependency relationship. The sole purpose of this table is to make the
@@ -18,16 +23,10 @@
 -- without re-querying env_builds/env_build_assignments for build history.
 -- Empty when the uploader had no template_id in objectMetadata (dev tooling).
 --
--- env_last_spawned_at is a one-time snapshot of envs.last_spawned_at taken
--- when the edge was recorded — informational only, for eyeballing "was this
--- template recently used" while inspecting the table. It does not track
--- envs.last_spawned_at going forward and plays no part in the ref_count
--- +1/-1 logic or any deletion decision.
 CREATE TABLE IF NOT EXISTS tos_build_edges (
     build_id             uuid NOT NULL,
     ancestor_id          uuid NOT NULL,
     env_id               text NOT NULL DEFAULT '',
-    env_last_spawned_at  timestamptz,
     source               text NOT NULL,
     recorded_at          timestamptz NOT NULL DEFAULT now(),
     deleted_at           timestamptz,
@@ -49,3 +48,15 @@ CREATE TABLE IF NOT EXISTS tos_ancestor_reference_count (
     ref_count     int NOT NULL DEFAULT 0 CHECK (ref_count >= 0),
     updated_at    timestamptz NOT NULL DEFAULT now()
 );
+
+-- Convenience view for manual inspection: joins each edge to envs.last_spawned_at
+-- live at query time, instead of a one-time snapshot column that would go
+-- stale the moment the owning template is spawned after the edge was
+-- recorded (the common case — edges are written when a build finishes,
+-- almost always before anyone has spawned a sandbox from it yet). Purely
+-- informational: not read by any Go code, no part of the ref_count +1/-1
+-- logic or any deletion decision.
+CREATE OR REPLACE VIEW tos_build_edges_with_env AS
+SELECT e.*, v.last_spawned_at AS env_last_spawned_at
+FROM tos_build_edges e
+LEFT JOIN envs v ON v.id = e.env_id;
