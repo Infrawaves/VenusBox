@@ -146,10 +146,15 @@ func (u *Upload) runV3(ctx context.Context) error {
 
 	// TEMPORARY DEBUG: tracing missing memfile tos-ref-count self-reference
 	// edge for ObjectOriginSnapshotTemplate builds. Remove once root-caused.
+	uploadsRedisNil := u.uploads == nil
+	if u.uploads != nil {
+		uploadsRedisNil = u.uploads.redis == nil
+	}
 	logger.L().Info(ctx, "tos-ref-count DEBUG: runV3 header state",
 		zap.String("build_id", u.buildID.String()),
 		zap.Bool("memfile_header_nil", memfileDiffHeader == nil),
 		zap.Bool("uploads_nil", u.uploads == nil),
+		zap.Bool("uploads_redis_nil", uploadsRedisNil),
 		zap.String("build_origin", u.objectMetadata[storage.ObjectMetadataBuildOrigin]),
 	)
 	if memfileDiffHeader != nil {
