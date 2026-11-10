@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"os"
 
+	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/e2b-dev/infra/packages/orchestrator/pkg/sandbox/build"
+	"github.com/e2b-dev/infra/packages/shared/pkg/logger"
 	"github.com/e2b-dev/infra/packages/shared/pkg/storage"
 	headers "github.com/e2b-dev/infra/packages/shared/pkg/storage/header"
 )
@@ -142,8 +144,30 @@ func (u *Upload) runV3(ctx context.Context) error {
 		return fmt.Errorf("wait rootfs diff header: %w", err)
 	}
 
+	// TEMPORARY DEBUG: tracing missing memfile tos-ref-count self-reference
+	// edge for ObjectOriginSnapshotTemplate builds. Remove once root-caused.
+	logger.L().Info(ctx, "tos-ref-count DEBUG: runV3 header state",
+		zap.String("build_id", u.buildID.String()),
+		zap.Bool("memfile_header_nil", memfileDiffHeader == nil),
+		zap.Bool("uploads_nil", u.uploads == nil),
+		zap.String("build_origin", u.objectMetadata[storage.ObjectMetadataBuildOrigin]),
+	)
+	if memfileDiffHeader != nil {
+		memfileBuilds := make([]string, 0, len(memfileDiffHeader.Mapping.Builds()))
+		for _, id := range memfileDiffHeader.Mapping.Builds() {
+			memfileBuilds = append(memfileBuilds, id.String())
+		}
+		logger.L().Info(ctx, "tos-ref-count DEBUG: memfile mapping at publish time",
+			zap.String("build_id", u.buildID.String()),
+			zap.Strings("memfile_ancestor_builds", memfileBuilds),
+		)
+	}
+
 	if memfileDiffHeader != nil {
 		if err := u.appendAncestorBuilds(ctx, nil, memfileDiffHeader.Mapping, build.Memfile); err != nil {
+			logger.L().Warn(ctx, "tos-ref-count DEBUG: appendAncestorBuilds(memfile) failed",
+				zap.String("build_id", u.buildID.String()), zap.Error(err))
+
 			return err
 		}
 		if u.uploads != nil {
