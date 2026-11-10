@@ -20,8 +20,11 @@ import (
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
+	"github.com/bsm/redislock"
 	"github.com/gofrs/flock"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 	"github.com/soheilhy/cmux"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -61,6 +64,7 @@ import (
 	"github.com/e2b-dev/infra/packages/orchestrator/pkg/startupreclaim"
 	"github.com/e2b-dev/infra/packages/orchestrator/pkg/template/constants"
 	tmplserver "github.com/e2b-dev/infra/packages/orchestrator/pkg/template/server"
+	"github.com/e2b-dev/infra/packages/orchestrator/pkg/tosrefcount"
 	"github.com/e2b-dev/infra/packages/orchestrator/pkg/volumes"
 	"github.com/e2b-dev/infra/packages/shared/pkg/env"
 	event "github.com/e2b-dev/infra/packages/shared/pkg/events"
@@ -74,6 +78,7 @@ import (
 	"github.com/e2b-dev/infra/packages/shared/pkg/logger"
 	sbxlogger "github.com/e2b-dev/infra/packages/shared/pkg/logger/sandbox"
 	"github.com/e2b-dev/infra/packages/shared/pkg/mtls"
+	redis_utils "github.com/e2b-dev/infra/packages/shared/pkg/redis"
 	sandboxcatalog "github.com/e2b-dev/infra/packages/shared/pkg/sandbox-catalog"
 	"github.com/e2b-dev/infra/packages/shared/pkg/storage"
 	"github.com/e2b-dev/infra/packages/shared/pkg/telemetry"
@@ -245,6 +250,58 @@ func openClickhouseEndpoints(ctx context.Context, config cfg.Config) ([]Clickhou
 	}
 
 	return endpoints, closers
+}
+
+// setupTOSRefCount starts the in-process TOS layer reference-counting
+// consumer (pkg/tosrefcount) when config.TOSRefCountPostgresConnectionString
+// is set. Empty connection string means the feature is off: no Postgres
+// connection is attempted, nothing is started, and (nil, nil) is returned.
+//
+// Unlike openClickhouseEndpoints, a connection failure here is not fatal —
+// this is a best-effort analytics side-channel (see
+// tos-reference-counting-plan.md), not a dependency builds need to
+// succeed. A failure is returned so the caller can log and continue
+// running template-manager without it.
+//
+// Build nodes run template-manager as a scalable pool, not a singleton
+// (docs/ARCHITECTURE.md), so the consumer only does its work while holding
+// a Redis-backed leader lock (pkg/tosrefcount.RunElected) — at most one
+// instance across the fleet writes ref_count at a time, and another
+// instance takes over within one lease TTL if the leader stops or loses
+// its lock.
+func setupTOSRefCount(ctx context.Context, config cfg.Config, redisClient redis.UniversalClient, startService func(name string, f func() error)) (*closer, error) {
+	dsn := config.TOSRefCountPostgresConnectionString
+	if dsn == "" {
+		return nil, nil
+	}
+	if redisClient == nil {
+		return nil, errors.New("TOS_REF_COUNT_POSTGRES_CONNECTION_STRING is set but Redis is disabled")
+	}
+
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		return nil, fmt.Errorf("connect postgres: %w", err)
+	}
+
+	consumer := tosrefcount.New(pool)
+	locker := &redis_utils.RedisLocker{Client: redislock.New(redisClient)}
+
+	startService("tos-ref-count: event consumer", func() error {
+		return tosrefcount.RunElected(ctx, locker, func(leaseCtx context.Context) error {
+			return consumer.ConsumeEvents(leaseCtx, redisClient)
+		})
+	})
+	startService("tos-ref-count: soft-delete scanner", func() error {
+		return tosrefcount.RunElected(ctx, locker, func(leaseCtx context.Context) error {
+			return consumer.RunSoftDeleteScanner(leaseCtx, 30*time.Second)
+		})
+	})
+
+	return &closer{"tos-ref-count: postgres pool", func(context.Context) error {
+		pool.Close()
+
+		return nil
+	}}, nil
 }
 
 // EgressSetup is returned by EgressFactory with the proxy implementation
@@ -1139,6 +1196,12 @@ func run(config cfg.Config, opts Options) (success bool) {
 		templatemanager.RegisterTemplateServiceServer(grpcServer, tmpl)
 
 		closers = append(closers, closer{"template server", tmpl.Close})
+
+		if tosRefCountCloser, err := setupTOSRefCount(ctx, config, redisClient, startService); err != nil {
+			logger.L().Error(ctx, "failed to set up TOS ref-count consumer, continuing without it", zap.Error(err))
+		} else if tosRefCountCloser != nil {
+			closers = append(closers, *tosRefCountCloser)
+		}
 	}
 
 	infoService := service.NewInfoService(serviceInfo, sandboxes, hostMetrics)

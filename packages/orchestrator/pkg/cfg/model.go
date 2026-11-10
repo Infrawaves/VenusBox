@@ -110,6 +110,13 @@ type Config struct {
 	Services                    []string          `env:"ORCHESTRATOR_SERVICES"         envDefault:"orchestrator"`
 	PersistentVolumeMounts      map[string]string `env:"PERSISTENT_VOLUME_MOUNTS"`
 
+	// TOSRefCountPostgresConnectionString gates the in-process TOS layer
+	// reference-counting consumer (pkg/tosrefcount), run under the
+	// template-manager role: empty means the feature is off entirely, no
+	// Postgres connection is attempted and no consumer goroutines start.
+	// Mirrors ClickhouseConnectionString's optional-connection convention.
+	TOSRefCountPostgresConnectionString string `env:"TOS_REF_COUNT_POSTGRES_CONNECTION_STRING"`
+
 	// TLS is the mutual TLS settings of the shared port and the peer hop.
 	TLS TLSConfig
 }
