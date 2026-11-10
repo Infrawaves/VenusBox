@@ -39,6 +39,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/e2b-dev/infra/packages/orchestrator/pkg/cfg"
 	"github.com/e2b-dev/infra/packages/shared/pkg/storage"
 	"github.com/e2b-dev/infra/packages/shared/pkg/storage/header"
 )
@@ -71,7 +72,12 @@ func main() {
 
 	ctx := context.Background()
 
-	provider, err := storage.GetStorageProvider(ctx, storage.TemplateStorageConfig)
+	spec, err := cfg.TemplateStorage()
+	if err != nil {
+		log.Fatalf("failed to resolve template storage config: %s", err)
+	}
+
+	provider, err := storage.NewProvider(ctx, spec)
 	if err != nil {
 		log.Fatalf("failed to initialize storage provider: %s", err)
 	}
