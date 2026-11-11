@@ -287,12 +287,12 @@ func setupTOSRefCount(ctx context.Context, config cfg.Config, redisClient redis.
 	locker := &redis_utils.RedisLocker{Client: redislock.New(redisClient)}
 
 	startService("tos-ref-count: event consumer", func() error {
-		return tosrefcount.RunElected(ctx, locker, func(leaseCtx context.Context) error {
+		return tosrefcount.RunElected(ctx, locker, "events", func(leaseCtx context.Context) error {
 			return consumer.ConsumeEvents(leaseCtx, redisClient)
 		})
 	})
 	startService("tos-ref-count: soft-delete scanner", func() error {
-		return tosrefcount.RunElected(ctx, locker, func(leaseCtx context.Context) error {
+		return tosrefcount.RunElected(ctx, locker, "soft-delete", func(leaseCtx context.Context) error {
 			return consumer.RunSoftDeleteScanner(leaseCtx, 30*time.Second)
 		})
 	})

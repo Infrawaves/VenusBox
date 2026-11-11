@@ -12,15 +12,20 @@ import (
 	redis_utils "github.com/e2b-dev/infra/packages/shared/pkg/redis"
 )
 
-// leaderLockKey is a single, fixed key: build nodes run template-manager as
-// a scalable pool (docs/ARCHITECTURE.md), not a singleton, and this consumer
-// assumes exactly one process is ever writing ref_count at a time — two
-// instances racing the same +1/-1 are individually idempotent but would
-// double the soft-delete scan's query load for no benefit. RunElected holds
-// this lock for as long as it is the active instance and keeps retrying
-// acquisition in the background so another instance takes over within one
-// TTL of a crash, without needing any coordination beyond Redis.
-const leaderLockKey = "tos-ref-count-consumer-leader"
+// lockKeyPrefix namespaces every RunElected lock under this package: build
+// nodes run template-manager as a scalable pool (docs/ARCHITECTURE.md), not
+// a singleton, and each independent loop RunElected guards (the event
+// consumer, the soft-delete scanner) needs exactly one instance across the
+// fleet running it. RunElected takes a distinct lockKey per caller — two
+// unrelated loops must NOT share a key, since that would serialize them
+// against each other within the same process instead of just across the
+// fleet (confirmed in practice: pointing both loops at one shared key left
+// whichever acquired second permanently starved, since nothing ever
+// released the key back to it short of the winner crashing). RunElected
+// holds its lock for as long as it is the active instance and keeps
+// retrying acquisition in the background so another instance takes over
+// within one TTL of a crash, without needing any coordination beyond Redis.
+const lockKeyPrefix = "tos-ref-count-consumer-leader-"
 
 const (
 	leaderLockTTL         = 30 * time.Second
@@ -29,21 +34,29 @@ const (
 )
 
 // RunElected runs fn only while this process holds the distributed leader
-// lock, retrying acquisition every leaderLockRetryPeriod until ctx is
-// canceled. fn is expected to block until its ctx is canceled; RunElected
-// cancels that ctx and waits for fn to return before releasing the lock,
-// so a lost lock (e.g. a refresh failure under Redis unavailability) always
-// stops fn before another instance can acquire the lock and start its own.
-func RunElected(ctx context.Context, locker redis_utils.Locker, fn func(context.Context) error) error {
+// lock keyed by lockKey, retrying acquisition every leaderLockRetryPeriod
+// until ctx is canceled. fn is expected to block until its ctx is canceled;
+// RunElected cancels that ctx and waits for fn to return before releasing
+// the lock, so a lost lock (e.g. a refresh failure under Redis
+// unavailability) always stops fn before another instance can acquire the
+// lock and start its own.
+//
+// lockKey must be distinct per logical loop (e.g. "events" vs
+// "soft-delete") — see lockKeyPrefix's comment for why a shared key across
+// unrelated loops is a bug, not just a naming nicety.
+func RunElected(ctx context.Context, locker redis_utils.Locker, lockKey string, fn func(context.Context) error) error {
+	fullKey := redis_utils.GetLockKey(lockKeyPrefix + lockKey)
+
 	for {
 		if ctx.Err() != nil {
 			return nil
 		}
 
-		lock, err := locker.Obtain(ctx, redis_utils.GetLockKey(leaderLockKey), leaderLockTTL, nil)
+		lock, err := locker.Obtain(ctx, fullKey, leaderLockTTL, nil)
 		if err != nil {
 			if !errors.Is(err, redislock.ErrNotObtained) {
-				logger.L().Warn(ctx, "tos-ref-count: leader lock obtain error, retrying", zap.Error(err))
+				logger.L().Warn(ctx, "tos-ref-count: leader lock obtain error, retrying",
+					zap.String("lock_key", lockKey), zap.Error(err))
 			}
 
 			select {
@@ -55,13 +68,15 @@ func RunElected(ctx context.Context, locker redis_utils.Locker, fn func(context.
 			continue
 		}
 
-		logger.L().Info(ctx, "tos-ref-count: acquired leader lock, starting consumer")
+		logger.L().Info(ctx, "tos-ref-count: acquired leader lock, starting consumer",
+			zap.String("lock_key", lockKey))
 
 		if err := runWithLease(ctx, lock, fn); err != nil {
 			return err
 		}
 
-		logger.L().Info(ctx, "tos-ref-count: lost leader lock, will retry acquisition")
+		logger.L().Info(ctx, "tos-ref-count: lost leader lock, will retry acquisition",
+			zap.String("lock_key", lockKey))
 	}
 }
 
