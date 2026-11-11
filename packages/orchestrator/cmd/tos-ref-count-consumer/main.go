@@ -86,12 +86,12 @@ func runConsume(ctx context.Context) {
 
 	errCh := make(chan error, 2)
 	go func() {
-		errCh <- tosrefcount.RunElected(ctx, locker, func(leaseCtx context.Context) error {
+		errCh <- tosrefcount.RunElected(ctx, locker, "events", func(leaseCtx context.Context) error {
 			return consumer.ConsumeEvents(leaseCtx, rdb)
 		})
 	}()
 	go func() {
-		errCh <- tosrefcount.RunElected(ctx, locker, func(leaseCtx context.Context) error {
+		errCh <- tosrefcount.RunElected(ctx, locker, "soft-delete", func(leaseCtx context.Context) error {
 			return consumer.RunSoftDeleteScanner(leaseCtx, 30*time.Second)
 		})
 	}()
