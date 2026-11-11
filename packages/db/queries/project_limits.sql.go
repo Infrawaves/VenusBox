@@ -87,7 +87,6 @@ INSERT INTO public.project_limits (
     api_team_rps_list,
     api_team_rps_delete,
     max_secrets,
-    volume_quota_gib,
     updated_at
 ) VALUES (
     $1::uuid,
@@ -104,7 +103,6 @@ INSERT INTO public.project_limits (
     $11::bigint,
     $12::bigint,
     $13::bigint,
-    $14::bigint,
     now()
 )
 ON CONFLICT (team_id) DO UPDATE SET
@@ -121,8 +119,6 @@ ON CONFLICT (team_id) DO UPDATE SET
     api_team_rps_list          = EXCLUDED.api_team_rps_list,
     api_team_rps_delete        = EXCLUDED.api_team_rps_delete,
     max_secrets                = EXCLUDED.max_secrets,
-    -- Optional in the push: a delivery that leaves it out keeps the stored one.
-    volume_quota_gib           = COALESCE(EXCLUDED.volume_quota_gib, public.project_limits.volume_quota_gib),
     updated_at                 = now()
 `
 
@@ -140,15 +136,13 @@ type UpsertProjectLimitsParams struct {
 	ApiTeamRpsList           int64
 	ApiTeamRpsDelete         int64
 	MaxSecrets               int64
-	VolumeQuotaGib           *int64
 }
 
 // UpsertProjectLimits records a project's effective limits, which the team
 // lookups read in preference to default_limits.
 //
 // Every column is supplied on every call: the caller sends a complete set, so
-// there is no partial update to merge and no prior row to read first. The one
-// exception is volume_quota_gib, which callers may omit (NULL).
+// there is no partial update to merge and no prior row to read first.
 //
 // max_disk_size_mb and max_free_disk_size_mb are the same ceiling under the old
 // and the new name, and the table holds them equal. Both are written here so a
@@ -171,7 +165,6 @@ func (q *Queries) UpsertProjectLimits(ctx context.Context, arg UpsertProjectLimi
 		arg.ApiTeamRpsList,
 		arg.ApiTeamRpsDelete,
 		arg.MaxSecrets,
-		arg.VolumeQuotaGib,
 	)
 	return err
 }

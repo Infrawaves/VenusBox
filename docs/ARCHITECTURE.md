@@ -552,6 +552,14 @@ already owned by a different user returns 409. A revocation removes only that Us
 caches member authorization, so each accepted command invalidates that User's authorization for
 the Project after commit.
 
+VenusBox volume quotas use the independent service-JWT route
+`PUT /v1/management/projects/{projectID}/volume-quota`, with required `revision` and
+nullable `quota_gib` fields. Its revision belongs to `public.team_volume_quotas`, independently
+of the upstream limits projection. Null restores inheritance from `public.volume_quota_defaults`;
+zero skips applying a quota and does not clear an existing vePFS limit. The generic limits route
+rejects its retired `volume_quota_gib` field and directs callers to this route. The API reads
+these settings directly from the primary database during volume creation, never from auth caches.
+
 `PUT /v1/management/projects/{projectID}/block` applies a revision-fenced block
 state. The `projection.project_blocks` revision and `public.teams.is_blocked` /
 `blocked_reason` commit together. Older or duplicate revisions leave stored state
@@ -626,7 +634,7 @@ user's team list. Volumes, builds and stored artifacts are not reclaimed.
 
 | Store | Owner packages | What lives there |
 |---|---|---|
-| **PostgreSQL** | `packages/db` (goose migrations, sqlc) | Durable control-plane state: `teams`, `users`, `default_limits` (the one row of quota defaults, including the team volume quota `volume_quota_gib`), `project_limits` (per-team quota overrides pushed in by the owning service; the team lookups read it in preference to `default_limits`), `tiers` and `addons` (read for limits only by the legacy `team_limits` view), `envs` (templates), `env_builds` (build rows: vcpu, ram_mb, status, versions), `env_aliases`, `snapshots` (paused sandboxes), `team_api_keys`, `volumes`, `clusters` |
+| **PostgreSQL** | `packages/db` (goose migrations, sqlc) | Durable control-plane state: `teams`, `users`, `default_limits` (the one row of upstream quota defaults), `project_limits` (per-team quota overrides pushed in by the owning service; the team lookups read it in preference to `default_limits`), `volume_quota_defaults` and `team_volume_quotas` (independent volume capacity settings, revision and filesystem/path binding), `tiers` and `addons` (read for limits only by the legacy `team_limits` view), `envs` (templates), `env_builds` (build rows: vcpu, ram_mb, status, versions), `env_aliases`, `snapshots` (paused sandboxes), `team_api_keys`, `volumes`, `clusters` |
 | **Redis** | API, client-proxy, orchestrator | Ephemeral runtime state: running-sandbox store (source of truth), sandbox→node routing catalog, team/template/snapshot caches, rate limiting, P2P chunk peer registry |
 | **ClickHouse** | `packages/clickhouse` | Time-series/analytics: `metrics_gauge`/`metrics_sum` (written by the OTel collector), `sandbox_events`, `sandbox_host_stats` (written by orchestrator), team metrics, and optionally `sandbox_logs` during the log migration. Read by API and dashboard-api |
 | **Object storage** (GCS/S3/local, `packages/shared/pkg/storage`) | orchestrator, template-manager | Template & snapshot artifacts, keyed by build ID: `{buildID}/memfile`, `{buildID}/rootfs.ext4`, `{buildID}/snapfile`, `{buildID}/metadata.json` + `.header` index files |
@@ -962,14 +970,27 @@ sequenceDiagram
   `cfg.VolumesTokenConfig`) signed by the API, scoped to the team and volume, presented as a bearer
   token on every content request. Its `aud` claim is `https://api.<domain>`, so a token minted for
   one cluster's origin is not accepted by another.
-- **Team quota (vePFS).** A team's volumes share one capacity limit, `volume_quota_gib` from the team
-  lookups (`project_limits`, else `default_limits`; 0 = unbounded). For volume types mapped to a vePFS
-  file system (`cfg.VolumeQuotaConfig`, `VEPFS_QUOTA_*`), `POST /volumes` first makes the API call
-  the Volcengine vePFS OpenAPI (`internal/volumequota`): it ensures a fileset at `/team-<id>/` — the
-  directory the orchestrator places the team's volumes in, with vePFS mounted at its root — and sets
-  the fileset's capacity quota. The orchestrator is called only after that succeeds, so a volume is
-  never created outside its team's quota; a failure refuses the create with 503. Orchestrators hold
-  no Volcengine credentials.
+- **Team quota (vePFS).** A team's managed volumes share one capacity limit from
+  `team_volume_quotas.quota_gib`, falling back to `volume_quota_defaults.quota_gib`.
+  The migration preserves the old limits-column values but leaves those columns unused by new
+  services. For types mapped by `VEPFS_QUOTA_FILE_SYSTEMS`, `POST /volumes` first calls the chosen
+  node's `ValidateVolumeMount`. The node checks its actual NFS mount, a filesystem-ID marker
+  `.e2b-volume-filesystem` at the mount root, and the team path relative to that root. For example,
+  `VEPFS_QUOTA_PATHS=vepfs:/volumes` requires a fileset at `/volumes/team-<id>/`, matching a volume
+  root one directory below the mount. Missing markers, local-disk fallback, mismatched paths,
+  symlinks and submounts are refused before creation. The operator must provision the marker only
+  after confirming the export is the named cloud filesystem's root.
+  The API then commits a permanent team filesystem/path binding and, in another transaction,
+  reads its current quota under a database row lock held through the vePFS fileset operations.
+  Settings updates use that same lock, so an older request cannot overwrite a newly applied quota;
+  the default row is held with a shared lock to order default changes too. A second filesystem or
+  fileset for the team's managed volumes is refused with 409. The binding survives failed cloud
+  work. The node's `CreateVolumeWithQuota` repeats mount verification before making directories;
+  old nodes do not implement these RPCs and there is no fallback to unverified creation.
+  Cloud or mount failures return 503. Only the API holds Volcengine credentials.
+  Settings synchronize on the next volume creation; zero leaves an existing cloud quota in place.
+  All nodes serving the volumes must maintain consistent storage configuration. Deployment must
+  quiesce old volume/quota writers around migration and upgrade nodes before enabling the new API.
 
 ### Pause and resume
 

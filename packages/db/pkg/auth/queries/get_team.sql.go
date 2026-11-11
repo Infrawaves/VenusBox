@@ -26,8 +26,7 @@ SELECT t.id, t.created_at, t.is_blocked, t.name, t.tier, t.email, t.is_banned, t
     COALESCE(pl.max_disk_size_mb, d.max_disk_size_mb) AS max_free_disk_size_mb,
     COALESCE(pl.api_team_rps_list, d.api_team_rps_list) AS api_team_rps_list,
     COALESCE(pl.api_team_rps_delete, d.api_team_rps_delete) AS api_team_rps_delete,
-    COALESCE(pl.max_secrets, d.max_secrets) AS max_secrets,
-    COALESCE(pl.volume_quota_gib, d.volume_quota_gib) AS volume_quota_gib
+    COALESCE(pl.max_secrets, d.max_secrets) AS max_secrets
 FROM "public"."team_api_keys" tak
 JOIN "public"."teams" t ON tak.team_id = t.id
 CROSS JOIN "public"."default_limits" d
@@ -52,7 +51,6 @@ type GetTeamByAPIKeyRow struct {
 	ApiTeamRpsList                   int64
 	ApiTeamRpsDelete                 int64
 	MaxSecrets                       int64
-	VolumeQuotaGib                   int64
 }
 
 // Each lookup resolves the team and its limits in one statement: the pushed
@@ -92,7 +90,6 @@ func (q *Queries) GetTeamByAPIKey(ctx context.Context, apiKeyHash string) (GetTe
 		&i.ApiTeamRpsList,
 		&i.ApiTeamRpsDelete,
 		&i.MaxSecrets,
-		&i.VolumeQuotaGib,
 	)
 	return i, err
 }
@@ -112,8 +109,7 @@ SELECT t.id, t.created_at, t.is_blocked, t.name, t.tier, t.email, t.is_banned, t
     COALESCE(pl.max_disk_size_mb, d.max_disk_size_mb) AS max_free_disk_size_mb,
     COALESCE(pl.api_team_rps_list, d.api_team_rps_list) AS api_team_rps_list,
     COALESCE(pl.api_team_rps_delete, d.api_team_rps_delete) AS api_team_rps_delete,
-    COALESCE(pl.max_secrets, d.max_secrets) AS max_secrets,
-    COALESCE(pl.volume_quota_gib, d.volume_quota_gib) AS volume_quota_gib
+    COALESCE(pl.max_secrets, d.max_secrets) AS max_secrets
 FROM "public"."teams" t
 JOIN "public"."users_teams" ut ON ut.team_id = t.id
 CROSS JOIN "public"."default_limits" d
@@ -143,7 +139,6 @@ type GetTeamByTeamAndUserRow struct {
 	ApiTeamRpsList                   int64
 	ApiTeamRpsDelete                 int64
 	MaxSecrets                       int64
-	VolumeQuotaGib                   int64
 }
 
 func (q *Queries) GetTeamByTeamAndUser(ctx context.Context, arg GetTeamByTeamAndUserParams) (GetTeamByTeamAndUserRow, error) {
@@ -178,7 +173,6 @@ func (q *Queries) GetTeamByTeamAndUser(ctx context.Context, arg GetTeamByTeamAnd
 		&i.ApiTeamRpsList,
 		&i.ApiTeamRpsDelete,
 		&i.MaxSecrets,
-		&i.VolumeQuotaGib,
 	)
 	return i, err
 }
@@ -198,8 +192,7 @@ SELECT t.id, t.created_at, t.is_blocked, t.name, t.tier, t.email, t.is_banned, t
     COALESCE(pl.max_disk_size_mb, d.max_disk_size_mb) AS max_free_disk_size_mb,
     COALESCE(pl.api_team_rps_list, d.api_team_rps_list) AS api_team_rps_list,
     COALESCE(pl.api_team_rps_delete, d.api_team_rps_delete) AS api_team_rps_delete,
-    COALESCE(pl.max_secrets, d.max_secrets) AS max_secrets,
-    COALESCE(pl.volume_quota_gib, d.volume_quota_gib) AS volume_quota_gib
+    COALESCE(pl.max_secrets, d.max_secrets) AS max_secrets
 FROM "public"."teams" t
 CROSS JOIN "public"."default_limits" d
 LEFT JOIN "public"."project_limits" pl ON pl.team_id = t.id
@@ -223,7 +216,6 @@ type GetTeamByTeamIDRow struct {
 	ApiTeamRpsList                   int64
 	ApiTeamRpsDelete                 int64
 	MaxSecrets                       int64
-	VolumeQuotaGib                   int64
 }
 
 func (q *Queries) GetTeamByTeamID(ctx context.Context, id uuid.UUID) (GetTeamByTeamIDRow, error) {
@@ -258,7 +250,6 @@ func (q *Queries) GetTeamByTeamID(ctx context.Context, id uuid.UUID) (GetTeamByT
 		&i.ApiTeamRpsList,
 		&i.ApiTeamRpsDelete,
 		&i.MaxSecrets,
-		&i.VolumeQuotaGib,
 	)
 	return i, err
 }
@@ -278,8 +269,7 @@ SELECT t.id, t.created_at, t.is_blocked, t.name, t.tier, t.email, t.is_banned, t
     COALESCE(pl.max_disk_size_mb, d.max_disk_size_mb) AS max_free_disk_size_mb,
     COALESCE(pl.api_team_rps_list, d.api_team_rps_list) AS api_team_rps_list,
     COALESCE(pl.api_team_rps_delete, d.api_team_rps_delete) AS api_team_rps_delete,
-    COALESCE(pl.max_secrets, d.max_secrets) AS max_secrets,
-    COALESCE(pl.volume_quota_gib, d.volume_quota_gib) AS volume_quota_gib
+    COALESCE(pl.max_secrets, d.max_secrets) AS max_secrets
 FROM "public"."teams" t
 JOIN "public"."users_teams" ut ON ut.team_id = t.id
 CROSS JOIN "public"."default_limits" d
@@ -305,7 +295,6 @@ type GetUserTeamsWithLimitsRow struct {
 	ApiTeamRpsList                   int64
 	ApiTeamRpsDelete                 int64
 	MaxSecrets                       int64
-	VolumeQuotaGib                   int64
 }
 
 func (q *Queries) GetUserTeamsWithLimits(ctx context.Context, userID uuid.UUID) ([]GetUserTeamsWithLimitsRow, error) {
@@ -347,7 +336,6 @@ func (q *Queries) GetUserTeamsWithLimits(ctx context.Context, userID uuid.UUID) 
 			&i.ApiTeamRpsList,
 			&i.ApiTeamRpsDelete,
 			&i.MaxSecrets,
-			&i.VolumeQuotaGib,
 		); err != nil {
 			return nil, err
 		}

@@ -28,7 +28,7 @@ func TestTeamLookupsReturnEveryDefaultLimit(t *testing.T) {
 	defaults := reflect.TypeFor[testqueries.DefaultLimit]()
 	want := map[string]reflect.Type{}
 	for field := range defaults.Fields() {
-		if field.Name != "ID" {
+		if field.Name != "ID" && field.Name != "VolumeQuotaGib" {
 			want[field.Name] = field.Type
 		}
 	}
@@ -67,8 +67,7 @@ func TestTeamLookupsResolveProjectLimitsElseDefaults(t *testing.T) {
 			max_length_hours = 101, concurrent_sandboxes = 102, concurrent_template_builds = 103,
 			max_vcpu = 104, max_ram_mb = 105, disk_mb = 106, events_ttl_days = 107,
 			default_free_disk_size_mb = 108, max_disk_size_mb = 109,
-			api_team_rps_list = 110, api_team_rps_delete = 111, max_secrets = 112,
-			volume_quota_gib = 113
+			api_team_rps_list = 110, api_team_rps_delete = 111, max_secrets = 112
 	`)
 	require.NoError(t, err)
 	defaults := map[string]int64{
@@ -76,7 +75,6 @@ func TestTeamLookupsResolveProjectLimitsElseDefaults(t *testing.T) {
 		"MaxVcpu": 104, "MaxRamMb": 105, "DiskMb": 106, "EventsTtlDays": 107,
 		"DefaultFreeDiskSizeMb": 108, "MaxDiskSizeMb": 109, "MaxFreeDiskSizeMb": 109,
 		"ApiTeamRpsList": 110, "ApiTeamRpsDelete": 111, "MaxSecrets": 112,
-		"VolumeQuotaGib": 113,
 	}
 
 	unpushed := seedTeam(t, sqlDB, "lookup-unpushed")
@@ -95,8 +93,8 @@ func TestTeamLookupsResolveProjectLimitsElseDefaults(t *testing.T) {
 			team_id, max_length_hours, concurrent_sandboxes, concurrent_template_builds,
 			max_vcpu, max_ram_mb, disk_mb, events_ttl_days,
 			default_free_disk_size_mb, max_disk_size_mb, max_free_disk_size_mb,
-			api_team_rps_list, api_team_rps_delete, max_secrets, volume_quota_gib
-		) VALUES ($1, 1, 2, 3, 4, 5, 6, 7, 8, 9, 1, 0, 11, 12, 13)
+			api_team_rps_list, api_team_rps_delete, max_secrets
+		) VALUES ($1, 1, 2, 3, 4, 5, 6, 7, 8, 9, 1, 0, 11, 12)
 	`, pushed)
 	require.NoError(t, err)
 	pushedLimits := map[string]int64{
@@ -104,7 +102,6 @@ func TestTeamLookupsResolveProjectLimitsElseDefaults(t *testing.T) {
 		"MaxVcpu": 4, "MaxRamMb": 5, "DiskMb": 6, "EventsTtlDays": 7,
 		"DefaultFreeDiskSizeMb": 8, "MaxDiskSizeMb": 9, "MaxFreeDiskSizeMb": 9,
 		"ApiTeamRpsList": 0, "ApiTeamRpsDelete": 11, "MaxSecrets": 12,
-		"VolumeQuotaGib": 13,
 	}
 
 	userID := uuid.New()

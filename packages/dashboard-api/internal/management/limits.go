@@ -44,8 +44,6 @@ type ProjectLimitsProjection struct {
 	APITeamRPSList           int64
 	APITeamRPSDelete         int64
 	MaxSecrets               int64
-	// Nil when the caller did not send it; the stored value is kept then.
-	VolumeQuotaGiB *int64
 }
 
 // ApplyProjectLimits records a project's effective limits, behind the revision
@@ -130,7 +128,6 @@ func (s *Service) applyProjectLimits(ctx context.Context, projection ProjectLimi
 		ApiTeamRpsList:           projection.APITeamRPSList,
 		ApiTeamRpsDelete:         projection.APITeamRPSDelete,
 		MaxSecrets:               projection.MaxSecrets,
-		VolumeQuotaGib:           projection.VolumeQuotaGiB,
 	}); err != nil {
 		if dberrors.IsCheckViolation(err) {
 			return false, fmt.Errorf("%w: %w", ErrProjectLimitsRejected, err)
@@ -177,11 +174,6 @@ func validateProjectLimitsProjection(projection ProjectLimitsProjection) error {
 			return fmt.Errorf("%w: %s must be at least %d, got %d",
 				ErrInvalidProjectLimits, floored.field, floored.floor, floored.value)
 		}
-	}
-
-	if projection.VolumeQuotaGiB != nil && *projection.VolumeQuotaGiB < 0 {
-		return fmt.Errorf("%w: volume_quota_gib must be at least 0, got %d",
-			ErrInvalidProjectLimits, *projection.VolumeQuotaGiB)
 	}
 
 	if projection.DefaultFreeDiskSizeMB > projection.MaxFreeDiskSizeMB {

@@ -115,6 +115,7 @@ func TestEveryManagementRouteReachesItsHandler(t *testing.T) {
 		{"deleteProject", http.MethodDelete, project, ""},
 		{"applyProjectMember", http.MethodPut, project + "/members/" + userID, `{"revision":1,"present":false}`},
 		{"upsertLimits", http.MethodPut, project + "/limits", `{}`},
+		{"upsertVolumeQuota", http.MethodPut, project + "/volume-quota", `{"revision":1,"quota_gib":100}`},
 		{"applyProjectBlock", http.MethodPut, project + "/block", `{"revision":1,"blocked":false}`},
 		{"registerCluster", http.MethodPut, cluster, `{"name":"a","endpoint":"a:443","endpoint_tls":true,"token":"token"}`},
 		{"deleteCluster", http.MethodDelete, cluster, ""},
@@ -173,6 +174,10 @@ func (r *routeRecorder) ManagementApplyProjectMember(c *gin.Context, _ api.Proje
 
 func (r *routeRecorder) ManagementUpsertProjectLimits(c *gin.Context, _ api.ProjectID) {
 	r.report(c, "upsertLimits")
+}
+
+func (r *routeRecorder) ManagementUpsertProjectVolumeQuota(c *gin.Context, _ api.ProjectID) {
+	r.report(c, "upsertVolumeQuota")
 }
 
 func (r *routeRecorder) ManagementApplyProjectBlock(c *gin.Context, _ api.ProjectID) {

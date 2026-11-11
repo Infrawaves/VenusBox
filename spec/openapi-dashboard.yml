@@ -1267,12 +1267,41 @@ components:
           type: integer
           format: int64
           minimum: 0
+          nullable: true
+          deprecated: true
           description: >-
-            GiB that all of the project's persistent volumes may hold together.
-            Zero leaves them unbounded. Optional: a push without it keeps the
-            value already stored, else the deployment default.
+            Retired from this endpoint. Supplying this field returns 400;
+            send quota_gib to PUT /v1/management/projects/{projectID}/volume-quota
+            with that endpoint's independent revision instead.
         decided_at:
           $ref: "#/components/schemas/ManagementDecidedAt"
+
+    ManagementProjectVolumeQuota:
+      type: object
+      description: >-
+        A project's persistent volume quota, versioned independently of its
+        sandbox and API limits. Accepted writes record the desired quota for
+        the next POST /volumes request to apply to storage.
+      required: [revision, quota_gib]
+      properties:
+        revision:
+          type: integer
+          format: int64
+          minimum: 1
+          description: >-
+            Raised whenever this project's desired volume quota changes.
+            Older and duplicate revisions leave the stored quota unchanged.
+            This sequence is independent of the /limits revision.
+        quota_gib:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 2147483647
+          nullable: true
+          description: >-
+            Total GiB available to the project's persistent volumes. Null
+            inherits the deployment default. Zero skips applying a quota;
+            an existing fileset quota is not cleared.
 
 tags:
   - name: builds
@@ -1950,6 +1979,33 @@ paths:
           $ref: "#/components/responses/500"
         "501":
           $ref: "#/components/responses/501"
+
+  /v1/management/projects/{projectID}/volume-quota:
+    parameters:
+      - $ref: "#/components/parameters/projectID"
+    put:
+      operationId: managementUpsertProjectVolumeQuota
+      summary: Set a project's independently versioned volume quota (v1).
+      tags: [control-plane-management]
+      security:
+        - AdminJWTAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ManagementProjectVolumeQuota"
+      responses:
+        "204":
+          description: Desired volume quota is stored or already superseded.
+        "400":
+          $ref: "#/components/responses/400"
+        "401":
+          $ref: "#/components/responses/401"
+        "404":
+          $ref: "#/components/responses/404"
+        "500":
+          $ref: "#/components/responses/500"
 
   /v1/management/projects/{projectID}/block:
     parameters:

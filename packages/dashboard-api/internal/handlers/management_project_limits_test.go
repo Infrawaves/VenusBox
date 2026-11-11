@@ -227,44 +227,18 @@ func TestUpsertProjectLimitsCarriesDeleteRatesToTheTeamLookup(t *testing.T) {
 	}
 }
 
-// The volume quota is optional in the push: one that leaves it out keeps what
-// an earlier push stored, and a team never pushed one gets the default.
-func TestUpsertProjectLimitsKeepsTheVolumeQuotaWhenLeftOut(t *testing.T) {
+func TestUpsertProjectLimitsRejectsTheRetiredVolumeQuotaField(t *testing.T) {
 	t.Parallel()
 
-	db := testutils.SetupDatabase(t)
-	teamID := testutils.CreateTestTeam(t, db)
-	store, _ := newLimitsStore(db)
+	for _, value := range []string{"100", "0", "null"} {
+		t.Run(value, func(t *testing.T) {
+			t.Parallel()
 
-	require.NoError(t, db.AuthDB.TestsRawSQL(t.Context(), `UPDATE public.default_limits SET volume_quota_gib = 7`))
-
-	for _, step := range []struct {
-		revision int64
-		quota    any // nil leaves it out
-		want     int64
-		status   int
-	}{
-		{1, nil, 7, http.StatusNoContent},
-		{2, 500, 500, http.StatusNoContent},
-		{3, nil, 500, http.StatusNoContent},
-		{4, -1, 500, http.StatusBadRequest},
-		{5, 0, 0, http.StatusNoContent},
-	} {
-		var body map[string]any
-		require.NoError(t, json.Unmarshal([]byte(validLimitsBody), &body))
-		body["revision"] = step.revision
-		if step.quota != nil {
-			body["volume_quota_gib"] = step.quota
-		}
-		encoded, err := json.Marshal(body)
-		require.NoError(t, err)
-
-		recorder := callUpsertProjectLimits(t, store, teamID, string(encoded))
-		require.Equal(t, step.status, recorder.Code, recorder.Body.String())
-
-		limits, err := db.AuthDB.GetTeamByTeamID(t.Context(), teamID)
-		require.NoError(t, err)
-		assert.Equal(t, step.want, limits.VolumeQuotaGib, "revision %d", step.revision)
+			body := strings.Replace(validLimitsBody, `"revision": 2`, `"revision": 2, "volume_quota_gib": `+value, 1)
+			recorder := callUpsertProjectLimits(t, &APIStore{}, uuid.New(), body)
+			require.Equal(t, http.StatusBadRequest, recorder.Code)
+			require.Contains(t, recorder.Body.String(), "/volume-quota")
+		})
 	}
 }
 

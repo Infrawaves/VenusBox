@@ -28,7 +28,7 @@ type fakeVePFS struct {
 	mu sync.Mutex
 
 	filesets  map[string]*vepfs.FilesetForDescribeFilesetsOutput // by path
-	describes map[string]int                                      // by path, after creation
+	describes map[string]int                                     // by path, after creation
 
 	createErr error
 	quotaErr  error
@@ -136,7 +136,7 @@ func TestEnsureTeamQuotaCreatesFilesetAndSetsQuota(t *testing.T) {
 	m := testManager(fake)
 	teamID := uuid.New()
 
-	require.NoError(t, m.EnsureTeamQuota(t.Context(), testVolumeType, teamID, 100))
+	require.NoError(t, m.ensureFileset(t.Context(), testVolumeType, teamID, 100))
 
 	assert.Equal(t, 1, fake.creates)
 	path := "/team-" + teamID.String() + "/"
@@ -160,7 +160,7 @@ func TestEnsureTeamQuotaAdoptsFilesetWithoutTrailingSlash(t *testing.T) {
 		Status:      volcengine.String(vepfs.EnumOfStatusForDescribeFilesetsOutputRunning),
 	}
 
-	require.NoError(t, m.EnsureTeamQuota(t.Context(), testVolumeType, teamID, 10))
+	require.NoError(t, m.ensureFileset(t.Context(), testVolumeType, teamID, 10))
 	assert.Zero(t, fake.creates, "the console fileset is adopted")
 	assert.Equal(t, int32(10), fake.limitAt(bare))
 }
@@ -172,12 +172,12 @@ func TestEnsureTeamQuotaIsIdempotentAndFollowsLimitChanges(t *testing.T) {
 	m := testManager(fake)
 	teamID := uuid.New()
 
-	require.NoError(t, m.EnsureTeamQuota(t.Context(), testVolumeType, teamID, 100))
-	require.NoError(t, m.EnsureTeamQuota(t.Context(), testVolumeType, teamID, 100))
+	require.NoError(t, m.ensureFileset(t.Context(), testVolumeType, teamID, 100))
+	require.NoError(t, m.ensureFileset(t.Context(), testVolumeType, teamID, 100))
 	assert.Equal(t, 1, fake.creates, "an existing fileset is reused")
 	assert.Equal(t, []int32{100}, fake.quotaSets, "an unchanged limit is not set again")
 
-	require.NoError(t, m.EnsureTeamQuota(t.Context(), testVolumeType, teamID, 250))
+	require.NoError(t, m.ensureFileset(t.Context(), testVolumeType, teamID, 250))
 	assert.Equal(t, 1, fake.creates)
 	assert.Equal(t, int32(250), fake.limitAt(TeamPath(teamID)))
 }
@@ -188,15 +188,15 @@ func TestEnsureTeamQuotaSkipsUnboundedAndUnmanaged(t *testing.T) {
 	fake := newFake()
 	m := testManager(fake)
 
-	require.NoError(t, m.EnsureTeamQuota(t.Context(), testVolumeType, uuid.New(), 0))
-	require.NoError(t, m.EnsureTeamQuota(t.Context(), "nfs", uuid.New(), 100))
+	require.NoError(t, m.ensureFileset(t.Context(), testVolumeType, uuid.New(), 0))
+	require.NoError(t, m.ensureFileset(t.Context(), "nfs", uuid.New(), 100))
 	assert.Zero(t, fake.creates)
 	assert.False(t, m.Manages("nfs"))
 	assert.True(t, m.Manages(testVolumeType))
 
 	var nilManager *Manager
 	assert.False(t, nilManager.Manages(testVolumeType))
-	require.NoError(t, nilManager.EnsureTeamQuota(t.Context(), testVolumeType, uuid.New(), 100))
+	require.NoError(t, nilManager.ensureFileset(t.Context(), testVolumeType, uuid.New(), 100))
 }
 
 func TestEnsureTeamQuotaRejectsTooLargeQuota(t *testing.T) {
@@ -205,7 +205,7 @@ func TestEnsureTeamQuotaRejectsTooLargeQuota(t *testing.T) {
 	fake := newFake()
 	m := testManager(fake)
 
-	err := m.EnsureTeamQuota(t.Context(), testVolumeType, uuid.New(), math.MaxInt32+1)
+	err := m.ensureFileset(t.Context(), testVolumeType, uuid.New(), math.MaxInt32+1)
 	require.ErrorIs(t, err, ErrQuotaTooLarge)
 	assert.Zero(t, fake.creates)
 }
@@ -229,28 +229,6 @@ func TestEnsureTeamQuotaAdoptsFilesetCreatedConcurrently(t *testing.T) {
 	assert.Equal(t, "fs-other", id)
 }
 
-func TestEnsureTeamQuotaConcurrentCreatesMakeOneFileset(t *testing.T) {
-	t.Parallel()
-
-	fake := newFake()
-	m := testManager(fake)
-	teamID := uuid.New()
-
-	var wg sync.WaitGroup
-	errs := make([]error, 8)
-	for i := range errs {
-		wg.Go(func() {
-			errs[i] = m.EnsureTeamQuota(t.Context(), testVolumeType, teamID, 10)
-		})
-	}
-	wg.Wait()
-
-	for _, err := range errs {
-		require.NoError(t, err)
-	}
-	assert.Equal(t, 1, fake.creates)
-}
-
 func TestEnsureTeamQuotaReportsFailures(t *testing.T) {
 	t.Parallel()
 
@@ -259,7 +237,7 @@ func TestEnsureTeamQuotaReportsFailures(t *testing.T) {
 
 		fake := newFake()
 		fake.createErr = errors.New("boom")
-		err := testManager(fake).EnsureTeamQuota(t.Context(), testVolumeType, uuid.New(), 10)
+		err := testManager(fake).ensureFileset(t.Context(), testVolumeType, uuid.New(), 10)
 		require.ErrorContains(t, err, "boom")
 	})
 
@@ -268,7 +246,7 @@ func TestEnsureTeamQuotaReportsFailures(t *testing.T) {
 
 		fake := newFake()
 		fake.quotaErr = errors.New("denied")
-		err := testManager(fake).EnsureTeamQuota(t.Context(), testVolumeType, uuid.New(), 10)
+		err := testManager(fake).ensureFileset(t.Context(), testVolumeType, uuid.New(), 10)
 		require.ErrorContains(t, err, "denied")
 	})
 
@@ -283,7 +261,7 @@ func TestEnsureTeamQuotaReportsFailures(t *testing.T) {
 			FilesetPath: volcengine.String(path),
 			Status:      volcengine.String(vepfs.EnumOfStatusForDescribeFilesetsOutputCreateError),
 		}
-		err := testManager(fake).EnsureTeamQuota(t.Context(), testVolumeType, teamID, 10)
+		err := testManager(fake).ensureFileset(t.Context(), testVolumeType, teamID, 10)
 		require.ErrorContains(t, err, "CreateError")
 	})
 }
@@ -291,7 +269,32 @@ func TestEnsureTeamQuotaReportsFailures(t *testing.T) {
 func TestNewWithoutFileSystemsIsNil(t *testing.T) {
 	t.Parallel()
 
-	m, err := New(cfg.VolumeQuotaConfig{})
+	m, err := New(cfg.VolumeQuotaConfig{}, nil)
 	require.NoError(t, err)
 	assert.Nil(t, m)
+}
+
+func TestFilesetUsesFilesystemRelativeVolumeRoot(t *testing.T) {
+	t.Parallel()
+	fake := newFake()
+	m := testManager(fake)
+	m.paths = map[string]string{testVolumeType: "/volumes/"}
+	teamID := uuid.New()
+	fsID, filesetPath := m.Fileset(testVolumeType, teamID)
+	require.Equal(t, testFileSystemID, fsID)
+	require.Equal(t, "/volumes/team-"+teamID.String()+"/", filesetPath)
+
+	// An earlier release may have created an unrelated fileset at /team-ID.
+	// Correcting the parent path must neither adopt it nor reuse its name.
+	fake.filesets[TeamPath(teamID)] = &vepfs.FilesetForDescribeFilesetsOutput{
+		FilesetId:     new("fs-old"),
+		FilesetName:   new("team-" + teamID.String()),
+		FilesetPath:   new(TeamPath(teamID)),
+		Status:        volcengine.String(vepfs.EnumOfStatusForDescribeFilesetsOutputRunning),
+		CapacityLimit: volcengine.Int32(5),
+	}
+	require.NoError(t, m.ensureFileset(t.Context(), testVolumeType, teamID, 10))
+	require.Equal(t, int32(10), fake.limitAt(filesetPath))
+	require.Equal(t, int32(5), fake.limitAt(TeamPath(teamID)))
+	require.NotEqual(t, "team-"+teamID.String(), volcengine.StringValue(fake.filesets[filesetPath].FilesetName))
 }

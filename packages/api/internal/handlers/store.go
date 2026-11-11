@@ -434,7 +434,7 @@ func NewAPIStore(ctx context.Context, tel *telemetry.Client, redisClient redis.U
 		sandboxEvents = webhookevents.NewSandboxEventsServiceClient(webhooksConn)
 	}
 
-	volumeQuota, err := volumequota.New(config.VolumeQuota)
+	volumeQuota, err := volumequota.New(config.VolumeQuota, sqlcDB)
 	if err != nil {
 		logger.L().Fatal(ctx, "Initializing vePFS volume quota manager", zap.Error(err))
 	}

@@ -1771,6 +1771,68 @@ func (x *UpdatePathResponse) GetEntry() *EntryInfo {
 	return nil
 }
 
+// Quota-managed volumes use a separate RPC so an older orchestrator cannot
+// silently ignore the storage identity checks and create an unbounded volume.
+type CreateVolumeWithQuotaRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Volume        *VolumeInfo            `protobuf:"bytes,1,opt,name=volume,proto3" json:"volume,omitempty"`
+	FileSystemId  string                 `protobuf:"bytes,2,opt,name=file_system_id,json=fileSystemId,proto3" json:"file_system_id,omitempty"`
+	FilesetPath   string                 `protobuf:"bytes,3,opt,name=fileset_path,json=filesetPath,proto3" json:"fileset_path,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateVolumeWithQuotaRequest) Reset() {
+	*x = CreateVolumeWithQuotaRequest{}
+	mi := &file_volume_proto_msgTypes[29]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateVolumeWithQuotaRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateVolumeWithQuotaRequest) ProtoMessage() {}
+
+func (x *CreateVolumeWithQuotaRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_volume_proto_msgTypes[29]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateVolumeWithQuotaRequest.ProtoReflect.Descriptor instead.
+func (*CreateVolumeWithQuotaRequest) Descriptor() ([]byte, []int) {
+	return file_volume_proto_rawDescGZIP(), []int{29}
+}
+
+func (x *CreateVolumeWithQuotaRequest) GetVolume() *VolumeInfo {
+	if x != nil {
+		return x.Volume
+	}
+	return nil
+}
+
+func (x *CreateVolumeWithQuotaRequest) GetFileSystemId() string {
+	if x != nil {
+		return x.FileSystemId
+	}
+	return ""
+}
+
+func (x *CreateVolumeWithQuotaRequest) GetFilesetPath() string {
+	if x != nil {
+		return x.FilesetPath
+	}
+	return ""
+}
+
 var File_volume_proto protoreflect.FileDescriptor
 
 const file_volume_proto_rawDesc = "" +
@@ -1891,7 +1953,11 @@ const file_volume_proto_rawDesc = "" +
 	"\x04_gid\"6\n" +
 	"\x12UpdatePathResponse\x12 \n" +
 	"\x05entry\x18\x01 \x01(\v2\n" +
-	".EntryInfoR\x05entry*\xf6\x01\n" +
+	".EntryInfoR\x05entry\"\x8c\x01\n" +
+	"\x1cCreateVolumeWithQuotaRequest\x12#\n" +
+	"\x06volume\x18\x01 \x01(\v2\v.VolumeInfoR\x06volume\x12$\n" +
+	"\x0efile_system_id\x18\x02 \x01(\tR\ffileSystemId\x12!\n" +
+	"\ffileset_path\x18\x03 \x01(\tR\vfilesetPath*\xf6\x01\n" +
 	"\rUserErrorCode\x12\x1b\n" +
 	"\x17UNKNOWN_USER_ERROR_CODE\x10\x00\x12\x12\n" +
 	"\x0ePATH_NOT_FOUND\x10\x01\x12\x17\n" +
@@ -1906,9 +1972,11 @@ const file_volume_proto_rawDesc = "" +
 	"\x15FILE_TYPE_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eFILE_TYPE_FILE\x10\x01\x12\x17\n" +
 	"\x13FILE_TYPE_DIRECTORY\x10\x02\x12\x15\n" +
-	"\x11FILE_TYPE_SYMLINK\x10\x032\xf3\x03\n" +
+	"\x11FILE_TYPE_SYMLINK\x10\x032\x8f\x05\n" +
 	"\rVolumeService\x12;\n" +
-	"\fCreateVolume\x12\x14.CreateVolumeRequest\x1a\x15.CreateVolumeResponse\x12;\n" +
+	"\fCreateVolume\x12\x14.CreateVolumeRequest\x1a\x15.CreateVolumeResponse\x12K\n" +
+	"\x13ValidateVolumeMount\x12\x1d.CreateVolumeWithQuotaRequest\x1a\x15.CreateVolumeResponse\x12M\n" +
+	"\x15CreateVolumeWithQuota\x12\x1d.CreateVolumeWithQuotaRequest\x1a\x15.CreateVolumeResponse\x12;\n" +
 	"\fDeleteVolume\x12\x14.DeleteVolumeRequest\x1a\x15.DeleteVolumeResponse\x122\n" +
 	"\tCreateDir\x12\x11.CreateDirRequest\x1a\x12.CreateDirResponse\x12,\n" +
 	"\aListDir\x12\x0f.ListDirRequest\x1a\x10.ListDirResponse\x127\n" +
@@ -1934,7 +2002,7 @@ func file_volume_proto_rawDescGZIP() []byte {
 }
 
 var file_volume_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_volume_proto_msgTypes = make([]protoimpl.MessageInfo, 29)
+var file_volume_proto_msgTypes = make([]protoimpl.MessageInfo, 30)
 var file_volume_proto_goTypes = []any{
 	(UserErrorCode)(0),                   // 0: UserErrorCode
 	(FileType)(0),                        // 1: FileType
@@ -1967,13 +2035,14 @@ var file_volume_proto_goTypes = []any{
 	(*StatPathResponse)(nil),             // 28: StatPathResponse
 	(*UpdatePathRequest)(nil),            // 29: UpdatePathRequest
 	(*UpdatePathResponse)(nil),           // 30: UpdatePathResponse
-	(*timestamppb.Timestamp)(nil),        // 31: google.protobuf.Timestamp
+	(*CreateVolumeWithQuotaRequest)(nil), // 31: CreateVolumeWithQuotaRequest
+	(*timestamppb.Timestamp)(nil),        // 32: google.protobuf.Timestamp
 }
 var file_volume_proto_depIdxs = []int32{
 	1,  // 0: EntryInfo.type:type_name -> FileType
-	31, // 1: EntryInfo.modified_time:type_name -> google.protobuf.Timestamp
-	31, // 2: EntryInfo.created_time:type_name -> google.protobuf.Timestamp
-	31, // 3: EntryInfo.accessed_time:type_name -> google.protobuf.Timestamp
+	32, // 1: EntryInfo.modified_time:type_name -> google.protobuf.Timestamp
+	32, // 2: EntryInfo.created_time:type_name -> google.protobuf.Timestamp
+	32, // 3: EntryInfo.accessed_time:type_name -> google.protobuf.Timestamp
 	0,  // 4: UserError.code:type_name -> UserErrorCode
 	2,  // 5: CreateVolumeRequest.volume:type_name -> VolumeInfo
 	2,  // 6: DeleteVolumeRequest.volume:type_name -> VolumeInfo
@@ -1996,29 +2065,34 @@ var file_volume_proto_depIdxs = []int32{
 	3,  // 23: StatPathResponse.entry:type_name -> EntryInfo
 	2,  // 24: UpdatePathRequest.volume:type_name -> VolumeInfo
 	3,  // 25: UpdatePathResponse.entry:type_name -> EntryInfo
-	6,  // 26: VolumeService.CreateVolume:input_type -> CreateVolumeRequest
-	8,  // 27: VolumeService.DeleteVolume:input_type -> DeleteVolumeRequest
-	13, // 28: VolumeService.CreateDir:input_type -> CreateDirRequest
-	11, // 29: VolumeService.ListDir:input_type -> ListDirRequest
-	25, // 30: VolumeService.CreateFile:input_type -> CreateFileRequest
-	17, // 31: VolumeService.GetFile:input_type -> GetFileRequest
-	15, // 32: VolumeService.DeletePath:input_type -> DeletePathRequest
-	27, // 33: VolumeService.StatPath:input_type -> StatPathRequest
-	29, // 34: VolumeService.UpdatePath:input_type -> UpdatePathRequest
-	7,  // 35: VolumeService.CreateVolume:output_type -> CreateVolumeResponse
-	9,  // 36: VolumeService.DeleteVolume:output_type -> DeleteVolumeResponse
-	14, // 37: VolumeService.CreateDir:output_type -> CreateDirResponse
-	12, // 38: VolumeService.ListDir:output_type -> ListDirResponse
-	26, // 39: VolumeService.CreateFile:output_type -> CreateFileResponse
-	21, // 40: VolumeService.GetFile:output_type -> GetFileResponse
-	16, // 41: VolumeService.DeletePath:output_type -> DeletePathResponse
-	28, // 42: VolumeService.StatPath:output_type -> StatPathResponse
-	30, // 43: VolumeService.UpdatePath:output_type -> UpdatePathResponse
-	35, // [35:44] is the sub-list for method output_type
-	26, // [26:35] is the sub-list for method input_type
-	26, // [26:26] is the sub-list for extension type_name
-	26, // [26:26] is the sub-list for extension extendee
-	0,  // [0:26] is the sub-list for field type_name
+	2,  // 26: CreateVolumeWithQuotaRequest.volume:type_name -> VolumeInfo
+	6,  // 27: VolumeService.CreateVolume:input_type -> CreateVolumeRequest
+	31, // 28: VolumeService.ValidateVolumeMount:input_type -> CreateVolumeWithQuotaRequest
+	31, // 29: VolumeService.CreateVolumeWithQuota:input_type -> CreateVolumeWithQuotaRequest
+	8,  // 30: VolumeService.DeleteVolume:input_type -> DeleteVolumeRequest
+	13, // 31: VolumeService.CreateDir:input_type -> CreateDirRequest
+	11, // 32: VolumeService.ListDir:input_type -> ListDirRequest
+	25, // 33: VolumeService.CreateFile:input_type -> CreateFileRequest
+	17, // 34: VolumeService.GetFile:input_type -> GetFileRequest
+	15, // 35: VolumeService.DeletePath:input_type -> DeletePathRequest
+	27, // 36: VolumeService.StatPath:input_type -> StatPathRequest
+	29, // 37: VolumeService.UpdatePath:input_type -> UpdatePathRequest
+	7,  // 38: VolumeService.CreateVolume:output_type -> CreateVolumeResponse
+	7,  // 39: VolumeService.ValidateVolumeMount:output_type -> CreateVolumeResponse
+	7,  // 40: VolumeService.CreateVolumeWithQuota:output_type -> CreateVolumeResponse
+	9,  // 41: VolumeService.DeleteVolume:output_type -> DeleteVolumeResponse
+	14, // 42: VolumeService.CreateDir:output_type -> CreateDirResponse
+	12, // 43: VolumeService.ListDir:output_type -> ListDirResponse
+	26, // 44: VolumeService.CreateFile:output_type -> CreateFileResponse
+	21, // 45: VolumeService.GetFile:output_type -> GetFileResponse
+	16, // 46: VolumeService.DeletePath:output_type -> DeletePathResponse
+	28, // 47: VolumeService.StatPath:output_type -> StatPathResponse
+	30, // 48: VolumeService.UpdatePath:output_type -> UpdatePathResponse
+	38, // [38:49] is the sub-list for method output_type
+	27, // [27:38] is the sub-list for method input_type
+	27, // [27:27] is the sub-list for extension type_name
+	27, // [27:27] is the sub-list for extension extendee
+	0,  // [0:27] is the sub-list for field type_name
 }
 
 func init() { file_volume_proto_init() }
@@ -2047,7 +2121,7 @@ func file_volume_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_volume_proto_rawDesc), len(file_volume_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   29,
+			NumMessages:   30,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

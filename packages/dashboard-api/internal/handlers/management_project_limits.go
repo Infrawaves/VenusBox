@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -27,11 +28,30 @@ func (s *APIStore) ManagementUpsertProjectLimits(c *gin.Context, projectID api.P
 	ctx := c.Request.Context()
 	attrs := []attribute.KeyValue{telemetry.WithTeamID(projectID.String())}
 
-	body, err := ginutils.ParseBody[api.ManagementProjectLimits](ctx, c)
+	raw, err := ginutils.ParseBody[json.RawMessage](ctx, c)
+	var body api.ManagementProjectLimits
+	if err == nil {
+		err = json.Unmarshal(raw, &body)
+	}
 	if err != nil {
 		telemetry.ReportErrorByCode(ctx, http.StatusBadRequest, "upsert project limits failed",
 			fmt.Errorf("parse project limits request: %w", err), attrs...)
 		s.sendAPIStoreError(c, http.StatusBadRequest, "Invalid request body")
+
+		return
+	}
+
+	// Keep detecting the retired field, including an explicit null, until all
+	// senders have moved to the independently revisioned volume-quota route.
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		s.sendAPIStoreError(c, http.StatusBadRequest, "Invalid request body")
+
+		return
+	}
+	if _, present := fields["volume_quota_gib"]; present {
+		s.sendAPIStoreError(c, http.StatusBadRequest,
+			"volume_quota_gib must be sent to PUT /v1/management/projects/{projectID}/volume-quota as quota_gib")
 
 		return
 	}
@@ -60,7 +80,6 @@ func (s *APIStore) ManagementUpsertProjectLimits(c *gin.Context, projectID api.P
 		APITeamRPSList:           body.ApiTeamRpsList,
 		APITeamRPSDelete:         body.ApiTeamRpsDelete,
 		MaxSecrets:               int64(body.MaxSecrets),
-		VolumeQuotaGiB:           body.VolumeQuotaGib,
 	}); err != nil {
 		s.sendProjectLimitsError(c, err, attrs...)
 

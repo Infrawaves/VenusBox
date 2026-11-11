@@ -18,8 +18,4 @@ type TeamLimits struct {
 	APITeamRPSDelete int64
 
 	MaxSecrets int64
-
-	// VolumeQuotaGiB caps the combined size of all of the team's persistent
-	// volumes. Zero leaves them unbounded.
-	VolumeQuotaGiB int64
 }
