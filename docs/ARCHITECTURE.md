@@ -985,7 +985,9 @@ sequenceDiagram
   Settings updates use that same lock, so an older request cannot overwrite a newly applied quota;
   the default row is held with a shared lock to order default changes too. A second filesystem or
   fileset for the team's managed volumes is refused with 409. The binding survives failed cloud
-  work. The node's `CreateVolumeWithQuota` repeats mount verification before making directories;
+  work. Preflight never looks up the team directory: a node's NFS client caches a failed lookup for
+  about a minute and would hide the directory vePFS creates with the fileset. The node's
+  `CreateVolumeWithQuota` repeats mount verification before making directories;
   old nodes do not implement these RPCs and there is no fallback to unverified creation.
   Cloud or mount failures return 503. Only the API holds Volcengine credentials.
   vePFS creates a fileset only at a path that does not exist yet, so the API creates the team's
