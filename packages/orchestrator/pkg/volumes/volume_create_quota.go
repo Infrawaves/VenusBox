@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"golang.org/x/sys/unix"
@@ -73,12 +74,12 @@ func (s *Service) createVolumeWithQuota(ctx context.Context, request *orchestrat
 
 	// Keep each creation relative to an already verified directory descriptor.
 	// NO_XDEV also rejects a bind mount of another subtree on the same device.
-	team, err := makeQuotaDirectory(root.file, root.teamName)
+	team, err := makeQuotaDirectory(ctx, root.file, root.teamName)
 	if err != nil {
 		return nil, status.Errorf(codes.FailedPrecondition, "opening quota team directory: %v", err)
 	}
 	defer team.Close()
-	created, err := makeQuotaDirectory(team, root.volumeName)
+	created, err := makeQuotaDirectory(ctx, team, root.volumeName)
 	if err != nil {
 		return nil, status.Errorf(codes.FailedPrecondition, "creating quota volume directory: %v", err)
 	}
@@ -258,12 +259,74 @@ func verifyQuotaMarker(root *os.File, filesystemID string) error {
 	return nil
 }
 
-func makeQuotaDirectory(parent *os.File, name string) (*os.File, error) {
-	if err := unix.Mkdirat(int(parent.Fd()), name, 0o700); err != nil && !errors.Is(err, unix.EEXIST) {
-		return nil, err
-	}
+// vePFS creates a fileset's directory on the server after the node's preflight
+// looked the path up and found nothing. The NFS client can keep that negative
+// lookup cached, so mkdir reaches the server and fails with EEXIST while the
+// following open is answered from the cache with ENOENT. Forcing a fresh
+// GETATTR of the parent invalidates the cached entry; retry briefly until the
+// lookup sees the server's directory.
+const (
+	quotaStaleLookupTimeout  = 10 * time.Second
+	quotaStaleLookupInterval = 250 * time.Millisecond
+)
 
-	return openQuotaDirectory(parent, name)
+type quotaDirectoryOps struct {
+	mkdirat  func(parent *os.File, name string) error
+	open     func(parent *os.File, name string) (*os.File, error)
+	refresh  func(parent *os.File) error
+	timeout  time.Duration
+	interval time.Duration
+}
+
+var defaultQuotaDirectoryOps = quotaDirectoryOps{
+	mkdirat: func(parent *os.File, name string) error {
+		return unix.Mkdirat(int(parent.Fd()), name, 0o700)
+	},
+	open:     openQuotaDirectory,
+	refresh:  refreshQuotaDirectory,
+	timeout:  quotaStaleLookupTimeout,
+	interval: quotaStaleLookupInterval,
+}
+
+func makeQuotaDirectory(ctx context.Context, parent *os.File, name string) (*os.File, error) {
+	return defaultQuotaDirectoryOps.makeDirectory(ctx, parent, name)
+}
+
+func (o quotaDirectoryOps) makeDirectory(ctx context.Context, parent *os.File, name string) (*os.File, error) {
+	deadline := time.Now().Add(o.timeout)
+	for {
+		mkdirErr := o.mkdirat(parent, name)
+		if mkdirErr != nil && !errors.Is(mkdirErr, unix.EEXIST) {
+			return nil, mkdirErr
+		}
+		dir, err := o.open(parent, name)
+		// Only "the server says it exists, the cache says it does not" is a
+		// stale lookup. Every other outcome, including EXDEV and ELOOP from
+		// the resolve restrictions, is final.
+		if err == nil || mkdirErr == nil || !errors.Is(err, unix.ENOENT) {
+			return dir, err
+		}
+		if !time.Now().Before(deadline) {
+			return nil, fmt.Errorf("directory %q exists on the server but is not visible on this node after %s: %w", name, o.timeout, err)
+		}
+		if err := o.refresh(parent); err != nil {
+			return nil, fmt.Errorf("refreshing parent of %q after a stale lookup: %w", name, err)
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(o.interval):
+		}
+	}
+}
+
+// refreshQuotaDirectory makes the NFS client fetch the directory's attributes
+// from the server. A changed directory invalidates its cached negative lookups.
+func refreshQuotaDirectory(dir *os.File) error {
+	var stat unix.Statx_t
+
+	return unix.Statx(int(dir.Fd()), "", unix.AT_EMPTY_PATH|unix.AT_STATX_FORCE_SYNC, unix.STATX_BASIC_STATS, &stat)
 }
 
 func openQuotaDirectory(parent *os.File, name string) (*os.File, error) {

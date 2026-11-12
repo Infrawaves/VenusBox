@@ -121,7 +121,7 @@ func (f *fakeVePFS) limitAt(path string) int32 {
 	return -1
 }
 
-func testManager(api filesetAPI) *Manager {
+func testManager(api FilesetAPI) *Manager {
 	m := newManager(api, map[string]string{testVolumeType: testFileSystemID})
 	m.settleInterval = time.Millisecond
 	m.settleTimeout = time.Second
@@ -182,13 +182,51 @@ func TestEnsureTeamQuotaIsIdempotentAndFollowsLimitChanges(t *testing.T) {
 	assert.Equal(t, int32(250), fake.limitAt(TeamPath(teamID)))
 }
 
-func TestEnsureTeamQuotaSkipsUnboundedAndUnmanaged(t *testing.T) {
+// An unbounded team still gets its fileset before its directory exists, since
+// vePFS cannot turn an existing directory into one when a quota comes later.
+func TestEnsureTeamQuotaCreatesUnboundedFileset(t *testing.T) {
+	t.Parallel()
+
+	fake := newFake()
+	m := testManager(fake)
+	teamID := uuid.New()
+	path := TeamPath(teamID)
+
+	require.NoError(t, m.ensureFileset(t.Context(), testVolumeType, teamID, 0))
+	assert.Equal(t, 1, fake.creates)
+	assert.Empty(t, fake.quotaSets, "an unbounded fileset gets no capacity limit")
+	assert.Equal(t, vepfs.EnumOfStatusForDescribeFilesetsOutputRunning, volcengine.StringValue(fake.filesets[path].Status))
+
+	// Raising the quota later only sets a limit on the same fileset.
+	require.NoError(t, m.ensureFileset(t.Context(), testVolumeType, teamID, 20))
+	assert.Equal(t, 1, fake.creates)
+	assert.Equal(t, int32(20), fake.limitAt(path))
+
+	// Zero again leaves the existing limit, which this API cannot clear.
+	require.NoError(t, m.ensureFileset(t.Context(), testVolumeType, teamID, 0))
+	assert.Equal(t, []int32{20}, fake.quotaSets)
+}
+
+func TestEnsureTeamQuotaReportsUnmanagedTeamDirectory(t *testing.T) {
+	t.Parallel()
+
+	fake := newFake()
+	fake.createErr = errors.New("InvalidParameter.FilesetPathExist: The specified fileset path is exist.\n\tstatus code: 400")
+
+	err := testManager(fake).ensureFileset(t.Context(), testVolumeType, uuid.New(), 10)
+	require.ErrorIs(t, err, ErrUnmanagedTeamDirectory)
+	require.ErrorContains(t, err, "FilesetPathExist")
+
+	// Without a quota, an existing team keeps creating volumes as before.
+	require.NoError(t, testManager(fake).ensureFileset(t.Context(), testVolumeType, uuid.New(), 0))
+}
+
+func TestEnsureTeamQuotaSkipsUnmanaged(t *testing.T) {
 	t.Parallel()
 
 	fake := newFake()
 	m := testManager(fake)
 
-	require.NoError(t, m.ensureFileset(t.Context(), testVolumeType, uuid.New(), 0))
 	require.NoError(t, m.ensureFileset(t.Context(), "nfs", uuid.New(), 100))
 	assert.Zero(t, fake.creates)
 	assert.False(t, m.Manages("nfs"))

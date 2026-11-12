@@ -15,6 +15,7 @@ import (
 
 	"github.com/e2b-dev/infra/packages/api/internal/api"
 	"github.com/e2b-dev/infra/packages/api/internal/clusters"
+	"github.com/e2b-dev/infra/packages/api/internal/volumequota"
 	"github.com/e2b-dev/infra/packages/auth/pkg/types"
 	"github.com/e2b-dev/infra/packages/db/pkg/dberrors"
 	quotadb "github.com/e2b-dev/infra/packages/db/pkg/volumequota"
@@ -118,6 +119,12 @@ func (a *APIStore) PostVolumes(c *gin.Context) {
 		if errors.Is(err, quotadb.ErrConflictingFileSystem) {
 			a.sendAPIStoreError(c, http.StatusConflict, "The team's volumes must share one quota fileset")
 			telemetry.ReportError(ctx, "conflicting volume quota fileset", err)
+
+			return
+		}
+		if errors.Is(err, volumequota.ErrUnmanagedTeamDirectory) {
+			a.sendAPIStoreError(c, http.StatusConflict, "The team's existing volumes are not under a quota fileset; migrate them before applying a quota")
+			telemetry.ReportError(ctx, "team volume directory exists without a quota fileset", err)
 
 			return
 		}

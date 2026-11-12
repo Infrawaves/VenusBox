@@ -29,8 +29,17 @@ import (
 	"github.com/e2b-dev/infra/packages/shared/pkg/logger"
 )
 
-// ErrQuotaTooLarge is returned for a limit vePFS cannot represent.
-var ErrQuotaTooLarge = errors.New("volume quota exceeds what vePFS accepts")
+var (
+	// ErrQuotaTooLarge is returned for a limit vePFS cannot represent.
+	ErrQuotaTooLarge = errors.New("volume quota exceeds what vePFS accepts")
+	// ErrUnmanagedTeamDirectory means the team's directory already exists as a
+	// plain directory. vePFS creates a fileset only at a path that does not
+	// exist yet, so the team's data must be migrated into a fileset first.
+	ErrUnmanagedTeamDirectory = errors.New("team volume directory exists without a vePFS fileset")
+)
+
+// vePFS's error code for CreateFileset at a path that already exists.
+const filesetPathExistCode = "FilesetPathExist"
 
 const (
 	// How long a fileset may stay in a transitional state before the call gives
@@ -40,8 +49,8 @@ const (
 	settleInterval = time.Second
 )
 
-// filesetAPI is the part of the vePFS client the manager uses.
-type filesetAPI interface {
+// FilesetAPI is the part of the vePFS client the manager uses.
+type FilesetAPI interface {
 	DescribeFilesetsWithContext(volcengine.Context, *vepfs.DescribeFilesetsInput, ...request.Option) (*vepfs.DescribeFilesetsOutput, error)
 	CreateFilesetWithContext(volcengine.Context, *vepfs.CreateFilesetInput, ...request.Option) (*vepfs.CreateFilesetOutput, error)
 	SetFilesetQuotaWithContext(volcengine.Context, *vepfs.SetFilesetQuotaInput, ...request.Option) (*vepfs.SetFilesetQuotaOutput, error)
@@ -50,7 +59,7 @@ type filesetAPI interface {
 // Manager applies team quotas on the vePFS file systems behind volume types.
 // A nil *Manager manages nothing, so callers need not check for one.
 type Manager struct {
-	api         filesetAPI
+	api         FilesetAPI
 	fileSystems map[string]string
 	paths       map[string]string
 	store       *quotadb.Store
@@ -80,14 +89,20 @@ func New(config cfg.VolumeQuotaConfig, db *dbclient.Client) (*Manager, error) {
 		return nil, fmt.Errorf("creating volcengine session: %w", err)
 	}
 
-	m := newManager(vepfs.New(sess), config.FileSystems)
+	return NewWithAPI(vepfs.New(sess), config, db), nil
+}
+
+// NewWithAPI builds a manager on the given vePFS client, so callers' tests can
+// exercise the quota flow without cloud calls. config must be configured.
+func NewWithAPI(api FilesetAPI, config cfg.VolumeQuotaConfig, db *dbclient.Client) *Manager {
+	m := newManager(api, config.FileSystems)
 	m.paths = config.Paths
 	m.store = quotadb.New(db)
 
-	return m, nil
+	return m
 }
 
-func newManager(api filesetAPI, fileSystems map[string]string) *Manager {
+func newManager(api FilesetAPI, fileSystems map[string]string) *Manager {
 	return &Manager{
 		api:            api,
 		fileSystems:    fileSystems,
@@ -173,19 +188,20 @@ func samePath(a, b string) bool {
 
 // ensureFileset makes the team's fileset on the file system behind
 // volumeType exist with a capacity quota of quotaGiB. It runs before the
-// orchestrator creates a volume so the volume is bounded from its first write.
-// A team directory that already exists, with data, can still become a fileset;
-// its data then counts against the quota.
+// orchestrator creates the team's directory: vePFS creates a fileset only at a
+// path that does not exist yet, so a team whose directory was made without one
+// cannot get a quota later without migrating its data.
 //
-// A quotaGiB of 0 means unbounded: nothing is created, and an existing fileset
-// is left as it is, since vePFS has no way to clear a quota through this API.
-// An unmanaged volume type is a no-op.
+// The fileset is therefore created even for a quotaGiB of 0 (unbounded), with
+// no capacity limit, so the team's quota can be raised later. A quotaGiB of 0
+// leaves an existing fileset's limit as it is, since vePFS has no way to clear
+// a quota through this API. An unmanaged volume type is a no-op.
 func (m *Manager) ensureFileset(ctx context.Context, volumeType string, teamID uuid.UUID, quotaGiB int64) error {
-	if !m.Manages(volumeType) || quotaGiB <= 0 {
+	if !m.Manages(volumeType) {
 		return nil
 	}
 
-	if quotaGiB > math.MaxInt32 {
+	if quotaGiB < 0 || quotaGiB > math.MaxInt32 {
 		return fmt.Errorf("%w: %d GiB", ErrQuotaTooLarge, quotaGiB)
 	}
 	limit := int32(quotaGiB)
@@ -199,6 +215,16 @@ func (m *Manager) ensureFileset(ctx context.Context, volumeType string, teamID u
 
 	if fileset == nil {
 		filesetID, err := m.createFileset(ctx, fileSystemID, teamID, path)
+		if limit == 0 && errors.Is(err, ErrUnmanagedTeamDirectory) {
+			// No limit was asked for, so the team keeps creating volumes in its
+			// plain directory as before; only a positive quota needs migration.
+			logger.L().Warn(ctx, "team volume directory has no vePFS fileset; a quota needs data migration first",
+				logger.WithTeamID(teamID.String()),
+				zap.String("file_system_id", fileSystemID),
+				zap.String("path", path))
+
+			return nil
+		}
 		if err != nil {
 			return err
 		}
@@ -217,7 +243,7 @@ func (m *Manager) ensureFileset(ctx context.Context, volumeType string, teamID u
 		return err
 	}
 
-	if volcengine.Int32Value(fileset.CapacityLimit) == limit {
+	if limit == 0 || volcengine.Int32Value(fileset.CapacityLimit) == limit {
 		return nil
 	}
 
@@ -256,8 +282,14 @@ func (m *Manager) createFileset(ctx context.Context, fileSystemID string, teamID
 	if err != nil {
 		// Another API replica may have created it between the lookup and here;
 		// the lock above only covers this process.
-		if existing, findErr := m.findFileset(ctx, fileSystemID, path); findErr == nil && existing != nil {
+		existing, findErr := m.findFileset(ctx, fileSystemID, path)
+		if findErr == nil && existing != nil {
 			return volcengine.StringValue(existing.FilesetId), nil
+		}
+		// The path exists but no fileset covers it: a plain team directory.
+		// The SDK's error carries the code in its message; match the code alone.
+		if findErr == nil && strings.Contains(err.Error(), filesetPathExistCode) {
+			return "", fmt.Errorf("%w: %s on %s: %w", ErrUnmanagedTeamDirectory, path, fileSystemID, err)
 		}
 
 		return "", fmt.Errorf("creating vePFS fileset %s on %s: %w", path, fileSystemID, err)

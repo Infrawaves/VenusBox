@@ -18,7 +18,7 @@ import (
 	quotadb "github.com/e2b-dev/infra/packages/db/pkg/volumequota"
 )
 
-func databaseManager(db *testutils.Database, api filesetAPI) *Manager {
+func databaseManager(db *testutils.Database, api FilesetAPI) *Manager {
 	m := testManager(api)
 	m.store = quotadb.New(db.SqlcClient)
 	m.paths = map[string]string{testVolumeType: "/volumes"}
@@ -148,8 +148,10 @@ func TestManagerBindingSurvivesCloudFailureAndUnboundedQuota(t *testing.T) {
 			setDatabaseQuota(t, first.store, teamID, 1, quota)
 			err := first.EnsureTeamQuota(t.Context(), testVolumeType, teamID)
 			if quota == 0 {
+				// Unbounded still creates the fileset, without setting a limit.
 				require.NoError(t, err)
-				assert.Zero(t, fake.creates)
+				assert.Equal(t, 1, fake.creates)
+				assert.Empty(t, fake.quotaSets)
 			} else {
 				require.ErrorContains(t, err, "cloud unavailable")
 			}

@@ -988,6 +988,11 @@ sequenceDiagram
   work. The node's `CreateVolumeWithQuota` repeats mount verification before making directories;
   old nodes do not implement these RPCs and there is no fallback to unverified creation.
   Cloud or mount failures return 503. Only the API holds Volcengine credentials.
+  vePFS creates a fileset only at a path that does not exist yet, so the API creates the team's
+  fileset before its first managed volume even when the quota is zero (with no capacity limit),
+  keeping a later quota possible. A team directory created without a fileset makes `CreateFileset`
+  fail with `FilesetPathExist`; with a positive quota `POST /volumes` then returns 409 until the data
+  is migrated into a fileset, while a zero quota keeps creating volumes unbounded as before.
   Settings synchronize on the next volume creation; zero leaves an existing cloud quota in place.
   All nodes serving the volumes must maintain consistent storage configuration. Deployment must
   quiesce old volume/quota writers around migration and upgrade nodes before enabling the new API.

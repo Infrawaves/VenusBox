@@ -3,11 +3,14 @@
 package volumes
 
 import (
+	"context"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -177,8 +180,117 @@ func TestQuotaDirectoryRejectsSubmount(t *testing.T) {
 	if rootID == procID {
 		t.Skip("/proc is not a separate mount")
 	}
-	_, err = makeQuotaDirectory(root, "proc")
+	_, err = makeQuotaDirectory(t.Context(), root, "proc")
 	require.ErrorIs(t, err, unix.EXDEV)
+}
+
+// fakeQuotaDirectoryOps simulates an NFS client whose cached negative lookup
+// hides a directory the server already has.
+type fakeQuotaDirectoryOps struct {
+	mkdirErr     error
+	staleOpens   int
+	opens        int
+	refreshes    int
+	directory    *os.File
+	refreshError error
+}
+
+func (f *fakeQuotaDirectoryOps) ops(timeout time.Duration) quotaDirectoryOps {
+	return quotaDirectoryOps{
+		mkdirat: func(*os.File, string) error { return f.mkdirErr },
+		open: func(*os.File, string) (*os.File, error) {
+			f.opens++
+			if f.opens <= f.staleOpens {
+				return nil, unix.ENOENT
+			}
+
+			return f.directory, nil
+		},
+		refresh: func(*os.File) error {
+			f.refreshes++
+
+			return f.refreshError
+		},
+		timeout:  timeout,
+		interval: time.Millisecond,
+	}
+}
+
+func openTestDirectory(t *testing.T) *os.File {
+	t.Helper()
+	dir, err := os.Open(t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { dir.Close() })
+
+	return dir
+}
+
+func TestMakeQuotaDirectoryRecoversFromStaleNegativeLookup(t *testing.T) {
+	t.Parallel()
+	parent := openTestDirectory(t)
+	fake := &fakeQuotaDirectoryOps{mkdirErr: unix.EEXIST, staleOpens: 2, directory: openTestDirectory(t)}
+
+	dir, err := fake.ops(time.Minute).makeDirectory(t.Context(), parent, "team-x")
+	require.NoError(t, err)
+	require.Same(t, fake.directory, dir)
+	require.Equal(t, 3, fake.opens)
+	require.Equal(t, 2, fake.refreshes, "each stale lookup must refresh the parent before retrying")
+}
+
+func TestMakeQuotaDirectoryDoesNotRetryAfterOwnMkdir(t *testing.T) {
+	t.Parallel()
+	// mkdir succeeded here, so ENOENT means the directory vanished: not stale.
+	fake := &fakeQuotaDirectoryOps{staleOpens: 1}
+
+	_, err := fake.ops(time.Minute).makeDirectory(t.Context(), openTestDirectory(t), "team-x")
+	require.ErrorIs(t, err, unix.ENOENT)
+	require.Equal(t, 1, fake.opens)
+	require.Zero(t, fake.refreshes)
+}
+
+func TestMakeQuotaDirectoryGivesUpOnPersistentStaleLookup(t *testing.T) {
+	t.Parallel()
+	fake := &fakeQuotaDirectoryOps{mkdirErr: unix.EEXIST, staleOpens: math.MaxInt}
+
+	_, err := fake.ops(20*time.Millisecond).makeDirectory(t.Context(), openTestDirectory(t), "team-x")
+	require.ErrorIs(t, err, unix.ENOENT)
+	require.ErrorContains(t, err, "not visible on this node")
+	require.Positive(t, fake.refreshes)
+}
+
+func TestMakeQuotaDirectoryStopsOnCancel(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	fake := &fakeQuotaDirectoryOps{mkdirErr: unix.EEXIST, staleOpens: math.MaxInt}
+
+	_, err := fake.ops(time.Minute).makeDirectory(ctx, openTestDirectory(t), "team-x")
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestMakeQuotaDirectoryReturnsFinalErrors(t *testing.T) {
+	t.Parallel()
+	t.Run("mkdir", func(t *testing.T) {
+		t.Parallel()
+		fake := &fakeQuotaDirectoryOps{mkdirErr: unix.EACCES}
+		_, err := fake.ops(time.Minute).makeDirectory(t.Context(), openTestDirectory(t), "team-x")
+		require.ErrorIs(t, err, unix.EACCES)
+		require.Zero(t, fake.opens)
+	})
+	t.Run("refresh", func(t *testing.T) {
+		t.Parallel()
+		fake := &fakeQuotaDirectoryOps{mkdirErr: unix.EEXIST, staleOpens: 1, refreshError: unix.EIO}
+		_, err := fake.ops(time.Minute).makeDirectory(t.Context(), openTestDirectory(t), "team-x")
+		require.ErrorIs(t, err, unix.EIO)
+	})
+}
+
+func TestRefreshQuotaDirectory(t *testing.T) {
+	t.Parallel()
+	dir, err := os.OpenFile(t.TempDir(), unix.O_PATH|unix.O_DIRECTORY, 0)
+	require.NoError(t, err)
+	defer dir.Close()
+	require.NoError(t, refreshQuotaDirectory(dir))
 }
 
 func TestQuotaVolumeRejectsMissingMount(t *testing.T) {
