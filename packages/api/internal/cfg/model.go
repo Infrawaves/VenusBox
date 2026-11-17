@@ -267,6 +267,7 @@ func (c VolumeQuotaConfig) validate() error {
 		if len(c.Paths) > 0 {
 			return errors.New("VEPFS_QUOTA_PATHS requires VEPFS_QUOTA_FILE_SYSTEMS")
 		}
+
 		return nil
 	}
 

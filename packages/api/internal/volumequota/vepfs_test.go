@@ -80,14 +80,14 @@ func (f *fakeVePFS) CreateFilesetWithContext(_ volcengine.Context, in *vepfs.Cre
 
 	id := "fs-" + uuid.NewString()
 	f.filesets[path] = &vepfs.FilesetForDescribeFilesetsOutput{
-		FilesetId:    volcengine.String(id),
+		FilesetId:    new(id),
 		FilesetName:  in.FilesetName,
 		FilesetPath:  in.FilesetPath,
 		FileSystemId: in.FileSystemId,
 		Status:       volcengine.String(vepfs.EnumOfStatusForDescribeFilesetsOutputCreating),
 	}
 
-	return &vepfs.CreateFilesetOutput{FilesetId: volcengine.String(id)}, nil
+	return &vepfs.CreateFilesetOutput{FilesetId: new(id)}, nil
 }
 
 func (f *fakeVePFS) SetFilesetQuotaWithContext(_ volcengine.Context, in *vepfs.SetFilesetQuotaInput, _ ...request.Option) (*vepfs.SetFilesetQuotaOutput, error) {
@@ -155,8 +155,8 @@ func TestEnsureTeamQuotaAdoptsFilesetWithoutTrailingSlash(t *testing.T) {
 	teamID := uuid.New()
 	bare := "/team-" + teamID.String()
 	fake.filesets[bare] = &vepfs.FilesetForDescribeFilesetsOutput{
-		FilesetId:   volcengine.String("fs-console"),
-		FilesetPath: volcengine.String(bare),
+		FilesetId:   new("fs-console"),
+		FilesetPath: new(bare),
 		Status:      volcengine.String(vepfs.EnumOfStatusForDescribeFilesetsOutputRunning),
 	}
 
@@ -258,8 +258,8 @@ func TestEnsureTeamQuotaAdoptsFilesetCreatedConcurrently(t *testing.T) {
 
 	// Another replica created it between this one's lookup and create.
 	fake.filesets[path] = &vepfs.FilesetForDescribeFilesetsOutput{
-		FilesetId:   volcengine.String("fs-other"),
-		FilesetPath: volcengine.String(path),
+		FilesetId:   new("fs-other"),
+		FilesetPath: new(path),
 		Status:      volcengine.String(vepfs.EnumOfStatusForDescribeFilesetsOutputRunning),
 	}
 	id, err := m.createFileset(t.Context(), testFileSystemID, teamID, path)
@@ -295,8 +295,8 @@ func TestEnsureTeamQuotaReportsFailures(t *testing.T) {
 		teamID := uuid.New()
 		path := TeamPath(teamID)
 		fake.filesets[path] = &vepfs.FilesetForDescribeFilesetsOutput{
-			FilesetId:   volcengine.String("fs-broken"),
-			FilesetPath: volcengine.String(path),
+			FilesetId:   new("fs-broken"),
+			FilesetPath: new(path),
 			Status:      volcengine.String(vepfs.EnumOfStatusForDescribeFilesetsOutputCreateError),
 		}
 		err := testManager(fake).ensureFileset(t.Context(), testVolumeType, teamID, 10)
