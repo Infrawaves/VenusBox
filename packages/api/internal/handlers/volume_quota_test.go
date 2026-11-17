@@ -69,8 +69,8 @@ func (f *fakeFilesets) DescribeFilesetsWithContext(_ volcengine.Context, in *vep
 	}
 
 	return &vepfs.DescribeFilesetsOutput{Filesets: []*vepfs.FilesetForDescribeFilesetsOutput{{
-		FilesetId:   volcengine.String(id),
-		FilesetPath: volcengine.String(path),
+		FilesetId:   new(id),
+		FilesetPath: new(path),
 		Status:      volcengine.String(vepfs.EnumOfStatusForDescribeFilesetsOutputRunning),
 	}}}, nil
 }
@@ -87,7 +87,7 @@ func (f *fakeFilesets) CreateFilesetWithContext(_ volcengine.Context, in *vepfs.
 	id := "fset-" + uuid.NewString()
 	f.filesets[volcengine.StringValue(in.FilesetPath)] = id
 
-	return &vepfs.CreateFilesetOutput{FilesetId: volcengine.String(id)}, nil
+	return &vepfs.CreateFilesetOutput{FilesetId: new(id)}, nil
 }
 
 func (f *fakeFilesets) SetFilesetQuotaWithContext(volcengine.Context, *vepfs.SetFilesetQuotaInput, ...request.Option) (*vepfs.SetFilesetQuotaOutput, error) {
@@ -146,7 +146,7 @@ func TestManagedVolumeReportsUnmanagedTeamDirectory(t *testing.T) {
 	db := testutils.SetupDatabase(t)
 	teamID := testutils.CreateTestTeam(t, db)
 	store := quotaTestStore(t, db, &fakeFilesets{
-		createErr: errors.New("InvalidParameter.FilesetPathExist: The specified fileset path is exist."),
+		createErr: errors.New("InvalidParameter.FilesetPathExist: The specified fileset path is exist."), //nolint:revive // mirrors the vePFS SDK's error text
 	})
 	setQuota := func(quotaGiB int64) {
 		t.Helper()

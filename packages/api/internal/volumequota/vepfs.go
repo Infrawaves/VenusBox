@@ -51,9 +51,9 @@ const (
 
 // FilesetAPI is the part of the vePFS client the manager uses.
 type FilesetAPI interface {
-	DescribeFilesetsWithContext(volcengine.Context, *vepfs.DescribeFilesetsInput, ...request.Option) (*vepfs.DescribeFilesetsOutput, error)
-	CreateFilesetWithContext(volcengine.Context, *vepfs.CreateFilesetInput, ...request.Option) (*vepfs.CreateFilesetOutput, error)
-	SetFilesetQuotaWithContext(volcengine.Context, *vepfs.SetFilesetQuotaInput, ...request.Option) (*vepfs.SetFilesetQuotaOutput, error)
+	DescribeFilesetsWithContext(ctx volcengine.Context, input *vepfs.DescribeFilesetsInput, opts ...request.Option) (*vepfs.DescribeFilesetsOutput, error)
+	CreateFilesetWithContext(ctx volcengine.Context, input *vepfs.CreateFilesetInput, opts ...request.Option) (*vepfs.CreateFilesetOutput, error)
+	SetFilesetQuotaWithContext(ctx volcengine.Context, input *vepfs.SetFilesetQuotaInput, opts ...request.Option) (*vepfs.SetFilesetQuotaOutput, error)
 }
 
 // Manager applies team quotas on the vePFS file systems behind volume types.
@@ -235,7 +235,7 @@ func (m *Manager) ensureFileset(ctx context.Context, volumeType string, teamID u
 			zap.String("fileset_id", filesetID),
 			zap.String("path", path))
 
-		fileset = &vepfs.FilesetForDescribeFilesetsOutput{FilesetId: volcengine.String(filesetID)}
+		fileset = &vepfs.FilesetForDescribeFilesetsOutput{FilesetId: new(filesetID)}
 	}
 
 	fileset, err = m.awaitRunning(ctx, fileSystemID, path, fileset)
@@ -248,9 +248,9 @@ func (m *Manager) ensureFileset(ctx context.Context, volumeType string, teamID u
 	}
 
 	_, err = m.api.SetFilesetQuotaWithContext(ctx, &vepfs.SetFilesetQuotaInput{
-		FileSystemId:  volcengine.String(fileSystemID),
+		FileSystemId:  new(fileSystemID),
 		FilesetId:     fileset.FilesetId,
-		CapacityLimit: volcengine.Int32(limit),
+		CapacityLimit: new(limit),
 	})
 	if err != nil {
 		return fmt.Errorf("setting quota of vePFS fileset %s on %s: %w", volcengine.StringValue(fileset.FilesetId), fileSystemID, err)
@@ -275,9 +275,9 @@ func (m *Manager) createFileset(ctx context.Context, fileSystemID string, teamID
 		name += fmt.Sprintf("-%x", digest[:4])
 	}
 	out, err := m.api.CreateFilesetWithContext(ctx, &vepfs.CreateFilesetInput{
-		FileSystemId: volcengine.String(fileSystemID),
+		FileSystemId: new(fileSystemID),
 		FilesetName:  new(name),
-		FilesetPath:  volcengine.String(path),
+		FilesetPath:  new(path),
 	})
 	if err != nil {
 		// Another API replica may have created it between the lookup and here;
@@ -318,10 +318,10 @@ func (m *Manager) findFileset(ctx context.Context, fileSystemID, path string) (*
 
 func (m *Manager) findFilesetSpelled(ctx context.Context, fileSystemID, path, spelling string) (*vepfs.FilesetForDescribeFilesetsOutput, error) {
 	out, err := m.api.DescribeFilesetsWithContext(ctx, &vepfs.DescribeFilesetsInput{
-		FileSystemId: volcengine.String(fileSystemID),
+		FileSystemId: new(fileSystemID),
 		Filters: []*vepfs.FilterForDescribeFilesetsInput{{
 			Key:   volcengine.String(vepfs.EnumOfKeyForDescribeFilesetsInputFilesetPath),
-			Value: volcengine.String(spelling),
+			Value: new(spelling),
 		}},
 	})
 	if err != nil {
