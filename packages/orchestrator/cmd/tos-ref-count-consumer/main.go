@@ -7,7 +7,7 @@
 //
 //	REDIS_URL                     Redis address (default "localhost:6379"), required for `consume`
 //	POSTGRES_CONNECTION_STRING    Postgres DSN, required for both subcommands
-//	TOS_REF_COUNT_TEAM_FILTER     Optional comma-separated team_id uuids; `consume` only processes those teams' envs when set (rollout aid, not used by `backfill`)
+//	TOS_REF_COUNT_TEAM_FILTER     Optional comma-separated team_id uuids; restricts `consume`'s soft-delete scan to those teams when set (event consumption is never filtered; not used by `backfill`)
 //
 // Usage:
 //
@@ -74,9 +74,9 @@ func runConsume(ctx context.Context) {
 	locker := &redis_utils.RedisLocker{Client: redislock.New(rdb)}
 
 	if len(teamFilter) > 0 {
-		log.Printf("tos-ref-count-consumer: team filter active, team_ids=%v", teamFilter)
+		log.Printf("tos-ref-count-consumer: soft-delete scan restricted to team_ids=%v (event consumption is not filtered)", teamFilter)
 	} else {
-		log.Printf("tos-ref-count-consumer: no team filter, processing all teams")
+		log.Printf("tos-ref-count-consumer: no team filter, soft-delete scan processes all teams")
 	}
 	log.Printf("tos-ref-count-consumer started, redis=%s list=%s", redisURL, tosrefcount.EventsListKey)
 
