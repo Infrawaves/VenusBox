@@ -1,17 +1,8 @@
-// Package tosrefcount maintains the TOS layer reference-counting tables
-// (tos_build_edges, tos_ancestor_reference_count) described in
-// tos-reference-counting-plan.md. It drains tosLayerEvent payloads pushed by
-// orchestrator's upload paths (pkg/sandbox/uploads.go, publishTOSLayerEvent)
-// from a Redis List, and separately polls envs.deleted_at to clear the edges
-// of soft-deleted templates.
+// Package tosrefcount maintains the TOS layer reference-counting tables (tos_build_edges, tos_ancestor_reference_count) described in tos-reference-counting-plan.md.
 //
-// This logic originally lived only in cmd/tos-ref-count-consumer as a
-// standalone dev-validation binary; it is now also run in-process by the
-// orchestrator binary itself (pkg/factories/run.go, under the
-// template-manager role) so it no longer needs to be started by hand. The
-// standalone binary remains as a thin wrapper over this package, still
-// useful for local dev runs and for driving the historical backfill mode
-// that reads tos-layer-scan's JSON Lines output.
+// It drains tosLayerEvent payloads pushed by orchestrator's upload paths (pkg/sandbox/uploads.go, publishTOSLayerEvent) from a Redis List, and separately polls envs.deleted_at to clear the edges of soft-deleted templates.
+//
+// It is run standalone by cmd/tos-ref-count-consumer, which deploys and scales independently of the orchestrator binary and also drives the historical backfill mode that reads tos-layer-scan's JSON Lines output.
 package tosrefcount
 
 import (
@@ -33,10 +24,7 @@ import (
 // EventsListKey is the Redis List publishTOSLayerEvent pushes onto.
 const EventsListKey = "tos.layer.ref.events"
 
-// Event mirrors pkg/sandbox/uploads.go's tosLayerEvent. Kept as an
-// independent copy rather than a shared type, since the two sides
-// communicate over a wire format (JSON on a Redis List), not a Go import —
-// decoding is deliberately tolerant of fields the producer may add later.
+// Event mirrors pkg/sandbox/uploads.go's tosLayerEvent, kept as an independent copy since the two sides talk over JSON on a Redis List, not a Go import.
 type Event struct {
 	BuildID     string   `json:"build_id"`
 	EnvID       string   `json:"env_id"` // envs.id / env_builds.env_id; empty for dev tooling
@@ -46,10 +34,7 @@ type Event struct {
 	Timestamp   int64    `json:"timestamp"`
 }
 
-// Consumer holds the Postgres pool the event and soft-delete-scan loops
-// write through. It carries no Redis client: ConsumeEvents takes one
-// explicitly since it is only needed for the live-event loop, not for the
-// scanner or the backfill path.
+// Consumer holds the Postgres pool the event and soft-delete-scan loops write through; it carries no Redis client since only ConsumeEvents needs one.
 type Consumer struct {
 	pool *pgxpool.Pool
 }
@@ -58,11 +43,7 @@ func New(pool *pgxpool.Pool) *Consumer {
 	return &Consumer{pool: pool}
 }
 
-// ConsumeEvents blocks, draining EventsListKey via BRPOP until ctx is
-// canceled. A handling failure for one event is logged and dropped rather
-// than retried — redelivery guarantees belong to the queue technology
-// eventually replacing this Redis List (see tos-reference-counting-plan.md
-// §10), not to this loop.
+// ConsumeEvents blocks, draining EventsListKey via BRPOP until ctx is canceled; a handling failure for one event is logged and dropped, not retried (redelivery belongs to a future queue, see tos-reference-counting-plan.md §10).
 func (c *Consumer) ConsumeEvents(ctx context.Context, rdb redis.UniversalClient) error {
 	for {
 		if ctx.Err() != nil {
@@ -110,13 +91,7 @@ func (c *Consumer) HandleEvent(ctx context.Context, payload string) error {
 		return fmt.Errorf("parse build_id %q: %w", event.BuildID, err)
 	}
 
-	// A header's own entry in Mapping.Builds() (buildID appearing in its own
-	// ancestor list) is kept, not filtered out — this is the self-reference
-	// edge that makes ref_count=0 mean "this template's env was soft-deleted"
-	// rather than just "no other build depends on it yet". See the design
-	// doc's route B: the self-edge is cleared only by ApplyTemplateSoftDelete
-	// (keyed on env_id), so it can never reach zero while the template is
-	// still alive — there's no path that decrements it except that one.
+	// buildID appearing in its own ancestor list is kept (route B self-reference), so ref_count=0 means the template was soft-deleted, not just "no dependent yet".
 	ancestorIDs := make([]uuid.UUID, 0, len(event.AncestorIDs))
 	for _, s := range event.AncestorIDs {
 		id, err := uuid.Parse(s)
@@ -134,18 +109,9 @@ func (c *Consumer) HandleEvent(ctx context.Context, payload string) error {
 	}
 }
 
-// ApplyUploadEvent registers buildID itself in tos_ancestor_reference_count
-// (ref_count defaulting to 0 if it has no row yet — every build that lands
-// in TOS must be queryable there, not just builds that happen to already
-// have a downstream dependent), then records build_id -> each ancestor_id as
-// an edge and bumps ref_count only for edges that did not already exist —
-// this is what makes the +1 tolerant of the same event being processed more
-// than once.
+// ApplyUploadEvent registers buildID itself in tos_ancestor_reference_count (defaulting ref_count to 0), then records build_id -> each ancestor_id as an edge, bumping ref_count only for edges that did not already exist.
 //
-// source is stamped on each inserted edge ("live_upload" from the event
-// loop, "backfill_scan" from the historical backfill path) so the two write
-// paths remain distinguishable in tos_build_edges without needing a second
-// table.
+// source distinguishes the two write paths ("live_upload" vs "backfill_scan") without needing a second table.
 func (c *Consumer) ApplyUploadEvent(ctx context.Context, buildID uuid.UUID, envID string, fileType string, ancestorIDs []uuid.UUID, source string) error {
 	tx, err := c.pool.Begin(ctx)
 	if err != nil {
@@ -172,10 +138,7 @@ func (c *Consumer) ApplyUploadEvent(ctx context.Context, buildID uuid.UUID, envI
 
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
-			// Edge already existed — this (build_id, ancestor_id) pair was
-			// already recorded by a prior delivery of this same event (or an
-			// earlier file_type's call for the same build/ancestor pair).
-			// Do not bump ref_count again.
+			// Edge already existed from a prior delivery — do not bump ref_count again.
 			continue
 		case err != nil:
 			return fmt.Errorf("insert edge %s -> %s: %w", buildID, ancestorID, err)

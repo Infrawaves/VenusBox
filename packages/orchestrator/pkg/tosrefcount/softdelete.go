@@ -11,24 +11,9 @@ import (
 	"github.com/e2b-dev/infra/packages/shared/pkg/logger"
 )
 
-// RunSoftDeleteScanner periodically reads envs.deleted_at (the production
-// template soft-delete timestamp, set by
-// packages/api/internal/handlers/template_delete.go — no event hook into
-// that path exists or is needed) and clears every edge recorded for each
-// newly-deleted template, decrementing ref_count accordingly. Blocks until
-// ctx is canceled.
+// RunSoftDeleteScanner periodically reads envs.deleted_at (set by packages/api/internal/handlers/template_delete.go; no event hook into that path exists or is needed) and clears every edge recorded for each newly-deleted template, decrementing ref_count accordingly. Blocks until ctx is canceled.
 //
-// Polling envs.deleted_at directly — rather than wiring a delete event out
-// of the API — means zero changes to API code: this is a read-only query
-// against a timestamp the production delete path already sets.
-//
-// watermark starts at the scanner's own start time so a restart does not
-// re-scan the full historical backlog of already-deleted templates; each
-// tick advances it past the newest deleted_at seen. Since the edge-clearing
-// UPDATE below is itself idempotent (its WHERE deleted_at IS NULL guard
-// means re-processing the same env_id a second time is a no-op), losing
-// track of the watermark across a restart only costs a wider re-scan, not
-// correctness.
+// watermark starts at the scanner's own start time so a restart does not re-scan the full historical backlog; losing track of it across a restart only costs a wider re-scan, not correctness, since the edge-clearing UPDATE is idempotent.
 func (c *Consumer) RunSoftDeleteScanner(ctx context.Context, interval time.Duration) error {
 	watermark := time.Now().Add(-interval) // catch anything deleted just before startup
 
@@ -98,14 +83,9 @@ func (c *Consumer) scanSoftDeletedTemplates(ctx context.Context, since time.Time
 	return newest, nil
 }
 
-// ApplyTemplateSoftDelete clears every edge recorded under envID (every
-// build this template ever produced, not just whatever it currently points
-// to — this is the whole point of carrying env_id on the edge instead of
-// re-deriving a build history from env_builds/env_build_assignments) and
-// decrements ref_count for each ancestor that actually had a live edge
-// cleared. The UPDATE's WHERE deleted_at IS NULL guard makes this
-// idempotent: re-running it for an env_id already processed finds no rows
-// and does nothing.
+// ApplyTemplateSoftDelete clears every edge recorded under envID (every build this template ever produced, not just its current one) and decrements ref_count for each ancestor that had a live edge cleared.
+//
+// Idempotent: the UPDATE's WHERE deleted_at IS NULL guard means re-running it for an already-processed env_id finds no rows and does nothing.
 func (c *Consumer) ApplyTemplateSoftDelete(ctx context.Context, envID string) error {
 	tx, err := c.pool.Begin(ctx)
 	if err != nil {
@@ -139,12 +119,7 @@ func (c *Consumer) ApplyTemplateSoftDelete(ctx context.Context, envID string) er
 	}
 
 	for _, ancestorID := range ancestorIDs {
-		// ref_count's CHECK (ref_count >= 0) is the backstop here: every live
-		// edge (deleted_at IS NULL) should correspond to exactly one +1
-		// already applied, so clearing it should never drive the count
-		// negative. If this fails, something upstream double-counted a -1 or
-		// under-counted a +1 — fail the whole batch loudly rather than let
-		// the constraint violation get swallowed into a silently wrong count.
+		// ref_count's CHECK (ref_count >= 0) backstops this: a violation means something upstream double-counted a -1 or under-counted a +1, so fail loudly rather than swallow it.
 		if _, err := tx.Exec(ctx, `
 			UPDATE tos_ancestor_reference_count
 			SET ref_count = ref_count - 1, updated_at = now()

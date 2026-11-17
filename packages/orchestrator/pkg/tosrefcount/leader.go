@@ -12,19 +12,7 @@ import (
 	redis_utils "github.com/e2b-dev/infra/packages/shared/pkg/redis"
 )
 
-// lockKeyPrefix namespaces every RunElected lock under this package: build
-// nodes run template-manager as a scalable pool (docs/ARCHITECTURE.md), not
-// a singleton, and each independent loop RunElected guards (the event
-// consumer, the soft-delete scanner) needs exactly one instance across the
-// fleet running it. RunElected takes a distinct lockKey per caller — two
-// unrelated loops must NOT share a key, since that would serialize them
-// against each other within the same process instead of just across the
-// fleet (confirmed in practice: pointing both loops at one shared key left
-// whichever acquired second permanently starved, since nothing ever
-// released the key back to it short of the winner crashing). RunElected
-// holds its lock for as long as it is the active instance and keeps
-// retrying acquisition in the background so another instance takes over
-// within one TTL of a crash, without needing any coordination beyond Redis.
+// lockKeyPrefix namespaces every RunElected lock: each independent loop needs its own distinct lockKey, since sharing one across unrelated loops serializes them against each other instead of just across the fleet (confirmed in practice — whichever acquired second was permanently starved).
 const lockKeyPrefix = "tos-ref-count-consumer-leader-"
 
 const (
@@ -33,17 +21,9 @@ const (
 	leaderLockRetryPeriod = 5 * time.Second
 )
 
-// RunElected runs fn only while this process holds the distributed leader
-// lock keyed by lockKey, retrying acquisition every leaderLockRetryPeriod
-// until ctx is canceled. fn is expected to block until its ctx is canceled;
-// RunElected cancels that ctx and waits for fn to return before releasing
-// the lock, so a lost lock (e.g. a refresh failure under Redis
-// unavailability) always stops fn before another instance can acquire the
-// lock and start its own.
+// RunElected runs fn only while this process holds the distributed leader lock keyed by lockKey, retrying acquisition every leaderLockRetryPeriod until ctx is canceled.
 //
-// lockKey must be distinct per logical loop (e.g. "events" vs
-// "soft-delete") — see lockKeyPrefix's comment for why a shared key across
-// unrelated loops is a bug, not just a naming nicety.
+// lockKey must be distinct per logical loop (e.g. "events" vs "soft-delete") — see lockKeyPrefix's comment.
 func RunElected(ctx context.Context, locker redis_utils.Locker, lockKey string, fn func(context.Context) error) error {
 	fullKey := redis_utils.GetLockKey(lockKeyPrefix + lockKey)
 
@@ -80,11 +60,7 @@ func RunElected(ctx context.Context, locker redis_utils.Locker, lockKey string, 
 	}
 }
 
-// runWithLease runs fn under a background refresh of lock, stopping fn as
-// soon as either fn returns or the refresh loop fails to extend the lock
-// before it expires. The lock is always released on the way out so the next
-// RunElected iteration (this process or another) can acquire it promptly
-// rather than waiting out the full TTL.
+// runWithLease runs fn under a background refresh of lock, stopping fn as soon as fn returns or the refresh fails, and always releases the lock on the way out.
 func runWithLease(ctx context.Context, lock redis_utils.Lock, fn func(context.Context) error) error {
 	leaseCtx, cancel := context.WithCancel(ctx)
 	defer cancel()

@@ -1,19 +1,7 @@
-// tos-ref-count-consumer is a standalone CLI wrapper over
-// packages/orchestrator/pkg/tosrefcount, the TOS layer reference-counting
-// consumer. It deploys and scales independently of the orchestrator binary
-// (see the "tos-ref-count-consumer" Nomad job), which lets orchestrator roll
-// without dragging this consumer along. It has two uses:
+// tos-ref-count-consumer is a standalone CLI wrapper over packages/orchestrator/pkg/tosrefcount that deploys and scales independently of the orchestrator binary (see the "tos-ref-count-consumer" Nomad job). It has two uses:
 //
-//   - `consume`: run the live event/soft-delete loops. This is the
-//     production entry point, and also works for local dev against a
-//     Redis/Postgres pair without a full orchestrator. It takes a
-//     Redis-backed leader lock (see pkg/tosrefcount.RunElected), so running
-//     more than one replica is safe — at most one is ever active.
-//   - `backfill`: the historical-backfill path from
-//     tos-reference-counting-plan.md §6. Reads tos-layer-scan's JSON Lines
-//     output (one buildResult per line, each listing ancestor_builds per
-//     artifact), looks up each build's owning env_id from env_builds, and
-//     writes edges with source='backfill_scan'.
+//   - `consume`: the production entry point, running the live event/soft-delete loops under a Redis-backed leader lock (see pkg/tosrefcount.RunElected), so more than one replica is safe to run.
+//   - `backfill`: the historical-backfill path from tos-reference-counting-plan.md §6, applying tos-layer-scan's JSON Lines output against env_builds.env_id with source='backfill_scan'.
 //
 // Configuration via environment variables:
 //
@@ -146,10 +134,7 @@ func runBackfill(ctx context.Context, args []string) {
 	log.Printf("backfill complete: %d build(s) processed, %d failed", processed, failed)
 }
 
-// scanLine mirrors cmd/tos-layer-scan's buildResult/artifactResult output
-// shape. Kept as an independent copy rather than a shared type for the same
-// reason as tosrefcount.Event: the two tools talk over a file format, not a
-// Go import.
+// scanLine mirrors cmd/tos-layer-scan's buildResult/artifactResult output shape, kept as an independent copy since the two tools talk over a file format, not a Go import.
 type scanLine struct {
 	BuildID   string `json:"build_id"`
 	Artifacts []struct {
@@ -157,11 +142,7 @@ type scanLine struct {
 	} `json:"artifacts"`
 }
 
-// backfillLine applies one tos-layer-scan JSON Lines row: unions
-// ancestor_builds across that build's artifacts (memfile and rootfs.ext4
-// cover the same dependency chain per tos-reference-counting-plan.md §1,
-// so either one, or both, contribute to the same edge set), looks up the
-// build's owning env_id from env_builds, and writes the edges.
+// backfillLine applies one tos-layer-scan JSON Lines row: unions ancestor_builds across the build's artifacts, looks up its owning env_id from env_builds, and writes the edges.
 func backfillLine(ctx context.Context, pool *pgxpool.Pool, consumer *tosrefcount.Consumer, line []byte) error {
 	var row scanLine
 	if err := json.Unmarshal(line, &row); err != nil {
@@ -200,11 +181,7 @@ func backfillLine(ctx context.Context, pool *pgxpool.Pool, consumer *tosrefcount
 	return consumer.ApplyUploadEvent(ctx, buildID, envID, "backfill", ancestorIDs, "backfill_scan")
 }
 
-// lookupEnvID reads env_builds.env_id for buildID. Returns "" (not an
-// error) when the build has no env_builds row at all — this is the
-// expected, normal case for the intermediate ancestor builds in a
-// dependency chain (tos-reference-counting-plan.md §1: "很多根本不在
-// env_builds 表里登记"), not a data problem to fail the whole line over.
+// lookupEnvID reads env_builds.env_id for buildID, returning "" (not an error) when the build has no env_builds row — the normal case for intermediate ancestor builds in a dependency chain.
 func lookupEnvID(ctx context.Context, pool *pgxpool.Pool, buildID uuid.UUID) (string, error) {
 	var envID *string
 	err := pool.QueryRow(ctx, `SELECT env_id FROM env_builds WHERE id = $1`, buildID).Scan(&envID)

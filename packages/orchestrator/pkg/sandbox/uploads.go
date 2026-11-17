@@ -252,13 +252,8 @@ func (u *Uploads) find(ctx context.Context, buildID uuid.UUID, t build.DiffType)
 }
 
 // --- TOS layer reference-counting event publishing (Redis List, best-effort) ---
-//
-// tosLayerEventsListKey is a plain Redis List, not the webhook-gated
-// RedisStreamsDelivery used elsewhere in this codebase (that implementation
-// checks a per-team subscription key before publishing, which would silently
-// drop events for teams with no webhook configured). This is a throwaway dev
-// validation of the write path (TOS reference-counting design); production
-// hardening (Streams, consumer groups, ack/retry) is tracked separately.
+
+// tosLayerEventsListKey is a plain Redis List (not the webhook-gated RedisStreamsDelivery used elsewhere); production hardening (Streams, consumer groups, ack/retry) is tracked separately.
 const tosLayerEventsListKey = "tos.layer.ref.events"
 
 // tosLayerEvent is pushed once per (build_id, file_type) after its header is
@@ -273,32 +268,13 @@ type tosLayerEvent struct {
 	Timestamp   int64    `json:"timestamp"`  // unix seconds
 }
 
-// publishTOSLayerEvent pushes a tosLayerEvent for the given build's header
-// onto a Redis List. Best-effort: a publish failure is logged and swallowed,
-// never returned, so a hiccup in this analytics side-channel can never fail
-// the build itself — the header is already durably in TOS by the time this
-// is called.
+// publishTOSLayerEvent pushes a tosLayerEvent for the given build's header onto a Redis List; a publish failure is logged and swallowed, never returned.
 //
-// Every origin is published except the intermediate per-step cache layers
-// produced inside a single template build's pipeline (buildOrigin ==
-// ObjectOriginTemplateBuildCache) — pause snapshots, snapshot templates, and
-// the final template build layer all still get an event. Each intermediate
-// cache layer's Mapping.Builds() already contains the full ancestor chain
-// down to the base image, so publishing from every one of them would record
-// the same chain once per layer — e.g. a 5-layer build would write
-// 1+2+3+4+5 duplicate edges instead of the 5 edges the final layer alone
-// already captures. Skipping just the intermediate layers keeps one edge
-// set per build and keeps ref_count meaning "how many templates still
-// depend on this layer", not "how many layers of this one build happened to
-// depend on this layer".
+// Skips intermediate per-step cache layers (buildOrigin == ObjectOriginTemplateBuildCache) since each one's Mapping.Builds() already contains the full ancestor chain, so publishing every layer would duplicate edges.
 //
-// envID is the template this build belongs to (storage.ObjectMetadataTemplateID
-// from the caller's objectMetadata — same string as envs.id/env_builds.env_id),
-// carried on the edge so a later template soft-delete can clear every edge
-// this template ever produced in one pass, without re-querying
-// env_builds/env_build_assignments for its build history.
-// tosLayerRefCountEventsEnabled reads TOSLayerRefCountEventsFlag at the
-// publish it decides; a nil client resolves to the flag's fallback (on).
+// envID (storage.ObjectMetadataTemplateID, same string as envs.id/env_builds.env_id) is carried on the edge so a template soft-delete can clear every edge it ever produced in one pass.
+
+// tosLayerRefCountEventsEnabled reads TOSLayerRefCountEventsFlag; a nil client resolves to the flag's fallback (on).
 func (u *Uploads) tosLayerRefCountEventsEnabled(ctx context.Context) bool {
 	if u.ff == nil {
 		return featureflags.TOSLayerRefCountEventsFlag.Fallback()

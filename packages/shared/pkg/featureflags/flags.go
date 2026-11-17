@@ -224,12 +224,7 @@ var (
 	// (fail closed) instead of only emitting a metric + log. Requires the check flag.
 	StorageSoftDeleteEnforceFlag = NewBoolFlag("storage-soft-delete-enforce", false)
 
-	// TOSLayerRefCountEventsFlag gates publishTOSLayerEvent (uploads.go): off
-	// skips the LPUSH entirely, a build/pause upload behaves exactly as if the
-	// ref-counting side-channel did not exist. The kill switch for this
-	// analytics side-channel when it misbehaves in production — flip off in
-	// LaunchDarkly, no redeploy, no data loss, since the consumer backfill
-	// (tos-layer-scan) can always recompute edges missed while this was off.
+	// TOSLayerRefCountEventsFlag is the kill switch for publishTOSLayerEvent (uploads.go); off skips the LPUSH, and tos-layer-scan can backfill any edges missed.
 	TOSLayerRefCountEventsFlag = NewBoolFlag("tos-layer-ref-count-events", true)
 
 	// UseMemFdFlag asks Firecracker to back guest memory with a memfd and

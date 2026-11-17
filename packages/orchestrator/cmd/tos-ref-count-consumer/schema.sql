@@ -1,28 +1,13 @@
--- TOS layer reference-counting: dev validation schema.
---
--- Manual-only. Not managed by packages/db/migrations. Run by hand against a
--- dev Postgres instance to validate the write path in
--- tos-ref-count-consumer before deciding whether this graduates into a real
--- migration.
+-- TOS layer reference-counting: dev validation schema. Manual-only, not managed by packages/db/migrations.
 --
 -- Run with: psql "$POSTGRES_CONNECTION_STRING" -f schema.sql
 --
--- If tos_build_edges already exists from before env_last_spawned_at was
--- replaced by the tos_build_edges_with_env view below, drop the now-unused
--- column once:
+-- If tos_build_edges already exists from before env_last_spawned_at was replaced by the tos_build_edges_with_env view below, drop the now-unused column once:
 --   ALTER TABLE tos_build_edges DROP COLUMN IF EXISTS env_last_spawned_at;
 
--- Table 1: edges. Records "build_id depends on ancestor_id", one row per
--- dependency relationship. The sole purpose of this table is to make the
--- ref_count +1/-1 below idempotent under at-least-once event delivery — it
--- is NOT queried to decide whether a build can be deleted.
+-- Table 1: edges, one row per "build_id depends on ancestor_id". Only makes the ref_count +1/-1 below idempotent under at-least-once delivery — not queried to decide whether a build can be deleted.
 --
--- env_id carries the owning template's id (envs.id / env_builds.env_id,
--- e.g. "ihvujp327d7kt4rox2l5") straight from the upload's objectMetadata, so
--- a template soft-delete can clear every edge it ever produced in one pass
--- without re-querying env_builds/env_build_assignments for build history.
--- Empty when the uploader had no template_id in objectMetadata (dev tooling).
---
+-- env_id (envs.id / env_builds.env_id) lets a template soft-delete clear every edge it ever produced in one pass, without re-querying env_builds/env_build_assignments for build history.
 CREATE TABLE IF NOT EXISTS tos_build_edges (
     build_id             uuid NOT NULL,
     ancestor_id          uuid NOT NULL,
@@ -49,13 +34,7 @@ CREATE TABLE IF NOT EXISTS tos_ancestor_reference_count (
     updated_at    timestamptz NOT NULL DEFAULT now()
 );
 
--- Convenience view for manual inspection: joins each edge to envs.last_spawned_at
--- live at query time, instead of a one-time snapshot column that would go
--- stale the moment the owning template is spawned after the edge was
--- recorded (the common case — edges are written when a build finishes,
--- almost always before anyone has spawned a sandbox from it yet). Purely
--- informational: not read by any Go code, no part of the ref_count +1/-1
--- logic or any deletion decision.
+-- Convenience view for manual inspection: joins envs.last_spawned_at live at query time rather than a stale snapshot column. Purely informational, not read by any Go code or deletion logic.
 CREATE OR REPLACE VIEW tos_build_edges_with_env AS
 SELECT e.*, v.last_spawned_at AS env_last_spawned_at
 FROM tos_build_edges e

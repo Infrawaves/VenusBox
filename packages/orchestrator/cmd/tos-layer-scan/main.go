@@ -1,12 +1,4 @@
-// tos-layer-scan is a standalone, read-only tool for analyzing template-storage
-// layer dependencies at scale. Given a list of build IDs, it reads each build's
-// memfile.header and rootfs.ext4.header from the template storage bucket and
-// reports which ancestor build IDs are referenced via header.Mapping.Builds().
-//
-// It does not modify anything in storage or in the database. It is not part of
-// the orchestrator binary and does not touch any existing orchestrator code —
-// it only imports the shared storage and storage/header packages that already
-// back production reads.
+// tos-layer-scan is a standalone, read-only tool that reads a build's memfile/rootfs headers from template storage and reports its ancestor build IDs via header.Mapping.Builds(); it does not modify storage or the database.
 //
 // Configuration is via standard environment variables, matching how the
 // orchestrator/template-manager configure storage:
@@ -167,10 +159,7 @@ func readIDs(path string) ([]string, error) {
 	return ids, scanner.Err()
 }
 
-// inspectBuild reads both the memfile and rootfs headers for a build and
-// reports the ancestor build IDs referenced by each. A header that is
-// missing or fails to parse is reported as such (HeaderFound=false) rather
-// than treated as "no dependencies" — callers must fail closed on this case.
+// inspectBuild reads both the memfile and rootfs headers for a build and reports the ancestor build IDs referenced by each; a missing/unparseable header is reported as HeaderFound=false, not treated as "no dependencies".
 func inspectBuild(ctx context.Context, provider storage.StorageProvider, buildID string) buildResult {
 	paths := storage.Paths{BuildID: buildID}
 
