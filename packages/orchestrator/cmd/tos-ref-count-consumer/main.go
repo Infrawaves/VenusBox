@@ -98,6 +98,7 @@ func runConsume(ctx context.Context) {
 		log.Println("shutting down")
 	case err := <-errCh:
 		if err != nil {
+			//nolint:gocritic // process exits immediately after; skipping the deferred closes is harmless
 			log.Fatalf("consumer loop exited: %s", err)
 		}
 	}
@@ -129,6 +130,7 @@ func runBackfill(ctx context.Context, args []string) {
 	scanner.Buffer(nil, 1<<20)
 	for scanner.Scan() {
 		if ctx.Err() != nil {
+			//nolint:gocritic // process exits immediately after; skipping the deferred closes is harmless
 			log.Fatal("interrupted")
 		}
 
@@ -141,6 +143,7 @@ func runBackfill(ctx context.Context, args []string) {
 		processed++
 	}
 	if err := scanner.Err(); err != nil {
+		//nolint:gocritic // process exits immediately after; skipping the deferred closes is harmless
 		log.Fatalf("read input: %s", err)
 	}
 

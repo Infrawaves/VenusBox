@@ -88,9 +88,9 @@ func runWithLease(ctx context.Context, lock redis_utils.Lock, fn func(context.Co
 	}
 
 	// Deliberately not derived from ctx: the lock must still be released even if ctx is already canceled, so another instance can acquire it promptly instead of waiting out the full TTL.
-	releaseCtx, releaseCancel := context.WithTimeout(context.Background(), 5*time.Second) //nolint:contextcheck // see comment above
+	releaseCtx, releaseCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer releaseCancel()
-	if err := lock.Release(releaseCtx); err != nil && !errors.Is(err, redislock.ErrLockNotHeld) {
+	if err := lock.Release(releaseCtx); err != nil && !errors.Is(err, redislock.ErrLockNotHeld) { //nolint:contextcheck // see comment above
 		logger.L().Warn(ctx, "tos-ref-count: leader lock release error", zap.Error(err))
 	}
 
