@@ -7,6 +7,7 @@
 //
 //	REDIS_URL                     Redis address (default "localhost:6379"), required for `consume`
 //	POSTGRES_CONNECTION_STRING    Postgres DSN, required for both subcommands
+//	TOS_REF_COUNT_TEAM_FILTER     Optional comma-separated team_id uuids; `consume` only processes those teams' envs when set (rollout aid, not used by `backfill`)
 //
 // Usage:
 //
@@ -24,6 +25,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -60,12 +62,22 @@ func runConsume(ctx context.Context) {
 	pool := mustConnectPostgres(ctx)
 	defer pool.Close()
 
+	teamFilter, err := parseTeamFilter(os.Getenv("TOS_REF_COUNT_TEAM_FILTER"))
+	if err != nil {
+		log.Fatalf("invalid TOS_REF_COUNT_TEAM_FILTER: %s", err)
+	}
+
 	rdb := redis.NewClient(&redis.Options{Addr: redisURL})
 	defer rdb.Close()
 
-	consumer := tosrefcount.New(pool)
+	consumer := tosrefcount.New(pool, teamFilter)
 	locker := &redis_utils.RedisLocker{Client: redislock.New(rdb)}
 
+	if len(teamFilter) > 0 {
+		log.Printf("tos-ref-count-consumer: team filter active, team_ids=%v", teamFilter)
+	} else {
+		log.Printf("tos-ref-count-consumer: no team filter, processing all teams")
+	}
 	log.Printf("tos-ref-count-consumer started, redis=%s list=%s", redisURL, tosrefcount.EventsListKey)
 
 	errCh := make(chan error, 2)
@@ -109,7 +121,7 @@ func runBackfill(ctx context.Context, args []string) {
 	}
 	defer f.Close()
 
-	consumer := tosrefcount.New(pool)
+	consumer := tosrefcount.New(pool, nil) // backfill is always full-scope, never filtered by team
 
 	var processed, failed int
 	scanner := bufio.NewScanner(f)
@@ -217,4 +229,23 @@ func getenv(key, fallback string) string {
 	}
 
 	return fallback
+}
+
+// parseTeamFilter parses a comma-separated list of team_id uuids, returning nil for an empty string (no filter, process every team); any entry that fails to parse is a fatal config error, not silently ignored.
+func parseTeamFilter(s string) ([]uuid.UUID, error) {
+	if s == "" {
+		return nil, nil
+	}
+
+	parts := strings.Split(s, ",")
+	ids := make([]uuid.UUID, 0, len(parts))
+	for _, p := range parts {
+		id, err := uuid.Parse(strings.TrimSpace(p))
+		if err != nil {
+			return nil, fmt.Errorf("parse team_id %q: %w", p, err)
+		}
+		ids = append(ids, id)
+	}
+
+	return ids, nil
 }

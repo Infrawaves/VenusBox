@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -35,12 +36,15 @@ type Event struct {
 }
 
 // Consumer holds the Postgres pool the event and soft-delete-scan loops write through; it carries no Redis client since only ConsumeEvents needs one.
+//
+// teamFilter, when non-empty, restricts both loops to envs.team_id being one of its entries — a rollout aid, not a permanent feature; empty/nil means process every team.
 type Consumer struct {
-	pool *pgxpool.Pool
+	pool       *pgxpool.Pool
+	teamFilter []uuid.UUID
 }
 
-func New(pool *pgxpool.Pool) *Consumer {
-	return &Consumer{pool: pool}
+func New(pool *pgxpool.Pool, teamFilter []uuid.UUID) *Consumer {
+	return &Consumer{pool: pool, teamFilter: teamFilter}
 }
 
 // ConsumeEvents blocks, draining EventsListKey via BRPOP until ctx is canceled; a handling failure for one event is logged and dropped, not retried (redelivery belongs to a future queue, see tos-reference-counting-plan.md §10).
@@ -91,6 +95,16 @@ func (c *Consumer) HandleEvent(ctx context.Context, payload string) error {
 		return fmt.Errorf("parse build_id %q: %w", event.BuildID, err)
 	}
 
+	if len(c.teamFilter) > 0 {
+		inTeam, err := c.envInTeamFilter(ctx, event.EnvID)
+		if err != nil {
+			return fmt.Errorf("check team filter for env %q: %w", event.EnvID, err)
+		}
+		if !inTeam {
+			return nil
+		}
+	}
+
 	// buildID appearing in its own ancestor list is kept (route B self-reference), so ref_count=0 means the template was soft-deleted, not just "no dependent yet".
 	ancestorIDs := make([]uuid.UUID, 0, len(event.AncestorIDs))
 	for _, s := range event.AncestorIDs {
@@ -106,6 +120,24 @@ func (c *Consumer) HandleEvent(ctx context.Context, payload string) error {
 		return c.ApplyUploadEvent(ctx, buildID, event.EnvID, event.FileType, ancestorIDs, "live_upload")
 	default:
 		return fmt.Errorf("unknown event_type %q", event.EventType)
+	}
+}
+
+// envInTeamFilter reports whether envID's team is in c.teamFilter. An empty envID (dev tooling, no template_id in objectMetadata) never matches.
+func (c *Consumer) envInTeamFilter(ctx context.Context, envID string) (bool, error) {
+	if envID == "" {
+		return false, nil
+	}
+
+	var teamID uuid.UUID
+	err := c.pool.QueryRow(ctx, `SELECT team_id FROM envs WHERE id = $1`, envID).Scan(&teamID)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return false, nil
+	case err != nil:
+		return false, err
+	default:
+		return slices.Contains(c.teamFilter, teamID), nil
 	}
 }
 

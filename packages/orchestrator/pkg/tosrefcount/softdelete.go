@@ -37,15 +37,16 @@ func (c *Consumer) RunSoftDeleteScanner(ctx context.Context, interval time.Durat
 	}
 }
 
-// scanSoftDeletedTemplates finds envs soft-deleted since since, clears their
-// edges, and returns the newest deleted_at seen (or since, unchanged, if
-// nothing new was found).
+// scanSoftDeletedTemplates finds envs soft-deleted since since (optionally
+// restricted to c.teamFilter), clears their edges, and returns the newest
+// deleted_at seen (or since, unchanged, if nothing new was found).
 func (c *Consumer) scanSoftDeletedTemplates(ctx context.Context, since time.Time) (time.Time, error) {
 	rows, err := c.pool.Query(ctx, `
 		SELECT id, deleted_at FROM envs
 		WHERE deleted_at IS NOT NULL AND deleted_at > $1
+		  AND (cardinality($2::uuid[]) = 0 OR team_id = ANY($2))
 		ORDER BY deleted_at ASC
-	`, since)
+	`, since, c.teamFilter)
 	if err != nil {
 		return since, fmt.Errorf("query soft-deleted envs: %w", err)
 	}
