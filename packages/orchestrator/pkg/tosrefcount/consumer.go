@@ -94,7 +94,6 @@ func (c *Consumer) HandleEvent(ctx context.Context, payload string) error {
 		return fmt.Errorf("parse build_id %q: %w", event.BuildID, err)
 	}
 
-	// buildID appearing in its own ancestor list is kept (route B self-reference), so ref_count=0 means the template was soft-deleted, not just "no dependent yet".
 	ancestorIDs := make([]uuid.UUID, 0, len(event.AncestorIDs))
 	for _, s := range event.AncestorIDs {
 		id, err := uuid.Parse(s)
@@ -112,7 +111,9 @@ func (c *Consumer) HandleEvent(ctx context.Context, payload string) error {
 	}
 }
 
-// ApplyUploadEvent registers buildID itself in tos_ancestor_reference_count (defaulting ref_count to 0), then records build_id -> each ancestor_id as an edge, bumping ref_count only for edges that did not already exist.
+// ApplyUploadEvent records build_id -> each ancestor_id as an edge (including an explicit self-reference for buildID, deduplicated against ancestorIDs if it's already present), bumping ref_count only for edges that did not already exist.
+//
+// The self-reference is added here rather than relying on ancestorIDs containing buildID, since a valid empty diff (e.g. a filesystem-only snapshot with no dirty blocks) fully inherits its parent's mapping and never lists its own ID — without an explicit self-reference, such a build would sit at ref_count=0 and look reclaimable despite being live.
 //
 // source distinguishes the two write paths ("live_upload" vs "backfill_scan") without needing a second table.
 func (c *Consumer) ApplyUploadEvent(ctx context.Context, buildID uuid.UUID, envID string, fileType string, ancestorIDs []uuid.UUID, source string) error {
@@ -122,12 +123,16 @@ func (c *Consumer) ApplyUploadEvent(ctx context.Context, buildID uuid.UUID, envI
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // rollback is a no-op after Commit
 
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO tos_ancestor_reference_count (ancestor_id, ref_count)
-		VALUES ($1, 0)
-		ON CONFLICT (ancestor_id) DO NOTHING
-	`, buildID); err != nil {
-		return fmt.Errorf("register build %s in reference count table: %w", buildID, err)
+	selfReferenced := false
+	for _, id := range ancestorIDs {
+		if id == buildID {
+			selfReferenced = true
+
+			break
+		}
+	}
+	if !selfReferenced {
+		ancestorIDs = append(ancestorIDs, buildID)
 	}
 
 	for _, ancestorID := range ancestorIDs {

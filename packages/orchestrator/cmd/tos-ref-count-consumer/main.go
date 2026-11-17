@@ -154,11 +154,16 @@ func runBackfill(ctx context.Context, args []string) {
 type scanLine struct {
 	BuildID   string `json:"build_id"`
 	Artifacts []struct {
+		Artifact       string   `json:"artifact"`
+		HeaderFound    bool     `json:"header_found"`
+		HeaderError    string   `json:"header_error,omitempty"`
 		AncestorBuilds []string `json:"ancestor_builds,omitempty"`
 	} `json:"artifacts"`
 }
 
 // backfillLine applies one tos-layer-scan JSON Lines row: unions ancestor_builds across the build's artifacts, looks up its owning env_id from env_builds, and writes the edges.
+//
+// Every artifact's header must have been read successfully. A missing/unreadable header (HeaderFound=false) is treated as a failure for the whole line, not a partial success — tos-layer-scan reports every build's memfile and rootfs header as present (see inspectArtifact), so a false HeaderFound here means the ancestors unique to that artifact were never counted, and silently continuing would make the edge set (and any future reclamation decision based on it) wrong rather than merely incomplete.
 func backfillLine(ctx context.Context, pool *pgxpool.Pool, consumer *tosrefcount.Consumer, line []byte) error {
 	var row scanLine
 	if err := json.Unmarshal(line, &row); err != nil {
@@ -173,6 +178,9 @@ func backfillLine(ctx context.Context, pool *pgxpool.Pool, consumer *tosrefcount
 	seen := make(map[uuid.UUID]struct{})
 	var ancestorIDs []uuid.UUID
 	for _, artifact := range row.Artifacts {
+		if !artifact.HeaderFound {
+			return fmt.Errorf("build %s: artifact %q header not read: %s", buildID, artifact.Artifact, artifact.HeaderError)
+		}
 		for _, s := range artifact.AncestorBuilds {
 			id, err := uuid.Parse(s)
 			if err != nil {

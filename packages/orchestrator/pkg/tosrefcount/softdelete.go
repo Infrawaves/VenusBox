@@ -41,12 +41,19 @@ func (c *Consumer) RunSoftDeleteScanner(ctx context.Context, interval time.Durat
 // restricted to c.teamFilter), clears their edges, and returns the newest
 // deleted_at seen (or since, unchanged, if nothing new was found).
 func (c *Consumer) scanSoftDeletedTemplates(ctx context.Context, since time.Time) (time.Time, error) {
+	// pgx encodes a nil slice as SQL NULL, and cardinality(NULL)=0 OR team_id=ANY(NULL) evaluates to NULL (not true),
+	// which would make WHERE exclude every row — normalize to a non-nil empty slice so "no filter" means "match everything".
+	teamFilter := c.teamFilter
+	if teamFilter == nil {
+		teamFilter = []uuid.UUID{}
+	}
+
 	rows, err := c.pool.Query(ctx, `
 		SELECT id, deleted_at FROM envs
 		WHERE deleted_at IS NOT NULL AND deleted_at > $1
 		  AND (cardinality($2::uuid[]) = 0 OR team_id = ANY($2))
 		ORDER BY deleted_at ASC
-	`, since, c.teamFilter)
+	`, since, teamFilter)
 	if err != nil {
 		return since, fmt.Errorf("query soft-deleted envs: %w", err)
 	}
