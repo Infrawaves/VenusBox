@@ -53,19 +53,20 @@ func main() {
 	case "backfill":
 		runBackfill(ctx, os.Args[2:])
 	default:
+		//nolint:gocritic // process exits immediately after; skipping stop() is harmless
 		log.Fatalf("unknown subcommand %q: usage: tos-ref-count-consumer <consume|backfill> [flags]", os.Args[1])
 	}
 }
 
 func runConsume(ctx context.Context) {
-	redisURL := getenv("REDIS_URL", "localhost:6379")
-	pool := mustConnectPostgres(ctx)
-	defer pool.Close()
-
 	teamFilter, err := parseTeamFilter(os.Getenv("TOS_REF_COUNT_TEAM_FILTER"))
 	if err != nil {
 		log.Fatalf("invalid TOS_REF_COUNT_TEAM_FILTER: %s", err)
 	}
+
+	redisURL := getenv("REDIS_URL", "localhost:6379")
+	pool := mustConnectPostgres(ctx)
+	defer pool.Close()
 
 	rdb := redis.NewClient(&redis.Options{Addr: redisURL})
 	defer rdb.Close()
@@ -112,14 +113,14 @@ func runBackfill(ctx context.Context, args []string) {
 		log.Fatal("-input is required (path to tos-layer-scan JSON Lines output)")
 	}
 
-	pool := mustConnectPostgres(ctx)
-	defer pool.Close()
-
 	f, err := os.Open(*inputFlag)
 	if err != nil {
 		log.Fatalf("open input: %s", err)
 	}
 	defer f.Close()
+
+	pool := mustConnectPostgres(ctx)
+	defer pool.Close()
 
 	consumer := tosrefcount.New(pool, nil) // backfill is always full-scope, never filtered by team
 
@@ -198,7 +199,7 @@ func lookupEnvID(ctx context.Context, pool *pgxpool.Pool, buildID uuid.UUID) (st
 	var envID *string
 	err := pool.QueryRow(ctx, `SELECT env_id FROM env_builds WHERE id = $1`, buildID).Scan(&envID)
 	switch {
-	case errors.Is(err, pgx.ErrNoRows):
+	case errors.Is(err, pgx.ErrNoRows): //nolint:forbidigo // this cmd is its own module and doesn't depend on packages/db
 		return "", nil
 	case err != nil:
 		return "", err

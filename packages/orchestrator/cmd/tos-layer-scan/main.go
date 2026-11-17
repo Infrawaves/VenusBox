@@ -78,7 +78,9 @@ func main() {
 		result := inspectBuild(ctx, provider, *buildFlag)
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		_ = enc.Encode(result)
+		if err := enc.Encode(result); err != nil {
+			log.Fatalf("failed to encode result: %s", err)
+		}
 
 		return
 	}
@@ -123,7 +125,9 @@ func runBatch(ctx context.Context, provider storage.StorageProvider, inputPath, 
 			result := inspectBuild(ctx, provider, buildID)
 
 			writeMu.Lock()
-			_ = enc.Encode(result)
+			if err := enc.Encode(result); err != nil {
+				fmt.Fprintf(os.Stderr, "failed to encode result for %s: %s\n", buildID, err)
+			}
 			writeMu.Unlock()
 
 			doneMu.Lock()

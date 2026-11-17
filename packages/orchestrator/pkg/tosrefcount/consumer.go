@@ -50,7 +50,7 @@ func New(pool *pgxpool.Pool, teamFilter []uuid.UUID) *Consumer {
 func (c *Consumer) ConsumeEvents(ctx context.Context, rdb redis.UniversalClient) error {
 	for {
 		if ctx.Err() != nil {
-			return nil
+			return nil //nolint:nilerr // graceful shutdown, not a failure
 		}
 
 		// BRPOP blocks for up to 5s so the loop can observe ctx cancellation
@@ -61,7 +61,7 @@ func (c *Consumer) ConsumeEvents(ctx context.Context, rdb redis.UniversalClient)
 		}
 		if err != nil {
 			if ctx.Err() != nil {
-				return nil
+				return nil //nolint:nilerr // graceful shutdown, not a failure
 			}
 
 			logger.L().Warn(ctx, "tos-ref-count: brpop error", zap.Error(err))
@@ -140,7 +140,7 @@ func (c *Consumer) ApplyUploadEvent(ctx context.Context, buildID uuid.UUID, envI
 		`, buildID, ancestorID, envID, source).Scan(&inserted)
 
 		switch {
-		case errors.Is(err, pgx.ErrNoRows):
+		case errors.Is(err, pgx.ErrNoRows): //nolint:forbidigo // tosrefcount is its own module and doesn't depend on packages/db
 			// Edge already existed from a prior delivery — do not bump ref_count again.
 			continue
 		case err != nil:
