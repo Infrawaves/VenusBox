@@ -1,18 +1,14 @@
 // tos-ref-count-consumer is a standalone CLI wrapper over
 // packages/orchestrator/pkg/tosrefcount, the TOS layer reference-counting
-// consumer. The orchestrator binary now runs this logic in-process under the
-// template-manager role (packages/orchestrator/pkg/factories/run.go,
-// setupTOSRefCount) whenever TOS_REF_COUNT_POSTGRES_CONNECTION_STRING is
-// set, so this binary is no longer required for normal operation. It still
-// has two uses:
+// consumer. It deploys and scales independently of the orchestrator binary
+// (see the "tos-ref-count-consumer" Nomad job), which lets orchestrator roll
+// without dragging this consumer along. It has two uses:
 //
-//   - `consume`: run the same live event/soft-delete loops standalone, for
-//     local dev against a Redis/Postgres pair without a full orchestrator,
-//     or as a manual stand-in if the in-process consumer needs to be
-//     bypassed. It takes the same Redis-backed leader lock as the
-//     in-process consumer (see pkg/tosrefcount.RunElected), so running this
-//     alongside orchestrator's own consumer is safe — at most one of them
-//     is ever active.
+//   - `consume`: run the live event/soft-delete loops. This is the
+//     production entry point, and also works for local dev against a
+//     Redis/Postgres pair without a full orchestrator. It takes a
+//     Redis-backed leader lock (see pkg/tosrefcount.RunElected), so running
+//     more than one replica is safe — at most one is ever active.
 //   - `backfill`: the historical-backfill path from
 //     tos-reference-counting-plan.md §6. Reads tos-layer-scan's JSON Lines
 //     output (one buildResult per line, each listing ancestor_builds per

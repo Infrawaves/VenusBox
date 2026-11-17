@@ -88,6 +88,7 @@ build-local:
 	$(eval COMMIT_SHA ?= $(shell git rev-parse --short HEAD))
 	CGO_ENABLED=1 GOOS=linux GOARCH=$(BUILD_ARCH) go build $(BUILD_TAGS) -o bin/orchestrator -ldflags "-X=main.commitSHA=$(COMMIT_SHA) $(VERSION_LDFLAGS) $(STATIC_LDFLAGS)" .
 	CGO_ENABLED=1 GOOS=linux GOARCH=$(BUILD_ARCH) go build $(BUILD_TAGS) -o bin/clean-nfs-cache -ldflags "-X=main.commitSHA=$(COMMIT_SHA) $(VERSION_LDFLAGS) $(STATIC_LDFLAGS)" ./cmd/clean-nfs-cache
+	CGO_ENABLED=0 GOOS=linux GOARCH=$(BUILD_ARCH) go build -o bin/tos-ref-count-consumer ./cmd/tos-ref-count-consumer
 
 # Compiler flags for debug builds. The default disables optimizations and
 # inlining so binaries are debugger-friendly. CI overrides this with an empty
