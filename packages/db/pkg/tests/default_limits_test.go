@@ -28,7 +28,7 @@ func TestTeamLookupsReturnEveryDefaultLimit(t *testing.T) {
 	defaults := reflect.TypeFor[testqueries.DefaultLimit]()
 	want := map[string]reflect.Type{}
 	for field := range defaults.Fields() {
-		if field.Name != "ID" {
+		if field.Name != "ID" && field.Name != "VolumeQuotaGib" {
 			want[field.Name] = field.Type
 		}
 	}
@@ -283,7 +283,9 @@ func TestDefaultLimitsMigrationKeepsWhatEveryTeamResolvedTo(t *testing.T) {
 		t.Helper()
 		var row string
 		require.NoError(t, sqlDB.QueryRowContext(ctx,
-			`SELECT to_jsonb(pl)::text FROM public.project_limits pl WHERE team_id = $1`, pushed).Scan(&row))
+			// Columns added by later migrations do not exist before the Up, so
+			// they are left out of the comparison.
+			`SELECT (to_jsonb(pl) - 'volume_quota_gib')::text FROM public.project_limits pl WHERE team_id = $1`, pushed).Scan(&row))
 
 		return row
 	}
@@ -319,7 +321,8 @@ func TestDefaultLimitsMigrationKeepsWhatEveryTeamResolvedTo(t *testing.T) {
 		"max_length_hours": 1, "concurrent_sandboxes": 33, "concurrent_template_builds": 20,
 		"max_vcpu": 3, "max_ram_mb": 8192, "disk_mb": 512, "events_ttl_days": 7,
 		"default_free_disk_size_mb": 512, "max_disk_size_mb": 25600,
-		"api_team_rps_list": 7, "api_team_rps_delete": 9, "max_secrets": 4
+		"api_team_rps_list": 7, "api_team_rps_delete": 9, "max_secrets": 4,
+		"volume_quota_gib": 0
 	}`, defaults, "seeded from the tuned base tier")
 
 	_, err = sqlDB.ExecContext(ctx, `UPDATE public.default_limits SET concurrent_sandboxes = 77`)

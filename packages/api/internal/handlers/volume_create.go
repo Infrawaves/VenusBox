@@ -10,11 +10,15 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/e2b-dev/infra/packages/api/internal/api"
 	"github.com/e2b-dev/infra/packages/api/internal/clusters"
+	"github.com/e2b-dev/infra/packages/api/internal/volumequota"
 	"github.com/e2b-dev/infra/packages/auth/pkg/types"
 	"github.com/e2b-dev/infra/packages/db/pkg/dberrors"
+	quotadb "github.com/e2b-dev/infra/packages/db/pkg/volumequota"
 	"github.com/e2b-dev/infra/packages/db/queries"
 	clustershared "github.com/e2b-dev/infra/packages/shared/pkg/clusters"
 	"github.com/e2b-dev/infra/packages/shared/pkg/featureflags"
@@ -112,6 +116,18 @@ func (a *APIStore) PostVolumes(c *gin.Context) {
 
 	response, err := a.createVolume(ctx, clusterID, volume)
 	if err != nil {
+		if errors.Is(err, quotadb.ErrConflictingFileSystem) {
+			a.sendAPIStoreError(c, http.StatusConflict, "The team's volumes must share one quota fileset")
+			telemetry.ReportError(ctx, "conflicting volume quota fileset", err)
+
+			return
+		}
+		if errors.Is(err, volumequota.ErrUnmanagedTeamDirectory) {
+			a.sendAPIStoreError(c, http.StatusConflict, "The team's existing volumes are not under a quota fileset; migrate them before applying a quota")
+			telemetry.ReportError(ctx, "team volume directory exists without a quota fileset", err)
+
+			return
+		}
 		if errors.Is(err, ErrClusterNotFound) {
 			a.sendAPIStoreError(c, http.StatusServiceUnavailable, "Cluster not found")
 			telemetry.ReportError(ctx, "cluster not found", err)
@@ -126,7 +142,11 @@ func (a *APIStore) PostVolumes(c *gin.Context) {
 			return
 		}
 
-		a.sendAPIStoreError(c, http.StatusInternalServerError, "Error when creating directory")
+		if a.volumeQuota.Manages(volume.VolumeType) {
+			a.sendAPIStoreError(c, http.StatusServiceUnavailable, "Error when verifying the volume mount or creating its directory")
+		} else {
+			a.sendAPIStoreError(c, http.StatusInternalServerError, "Error when creating directory")
+		}
 		telemetry.ReportCriticalError(ctx, "error when creating directory", err)
 
 		return
@@ -216,7 +236,7 @@ func (a *APIStore) getVolumeType(ctx context.Context, team *types.Team) string {
 		return volumeType
 	}
 
-	if team != nil && team.ClusterID != nil {
+	if usesCustomCluster(team) {
 		return a.config.PlaceholderPersistentVolumeType
 	}
 
@@ -297,12 +317,44 @@ func (a *APIStore) cleanupOrchestratorVolume(ctx context.Context, clusterID uuid
 
 func (a *APIStore) createVolume(ctx context.Context, clusterID uuid.UUID, volume queries.Volume) (response *orchestrator.CreateVolumeResponse, err error) {
 	err = a.executeOnOrchestratorByClusterID(ctx, clusterID, volume, func(ctx context.Context, client *clusters.GRPCClient) error {
-		response, err = client.Volumes.CreateVolume(ctx, &orchestrator.CreateVolumeRequest{
-			Volume: toVolumeKey(volume),
-		})
+		response, err = a.createVolumeOnNode(ctx, client.Volumes, volume)
 
 		return err
 	})
 
 	return
+}
+
+func (a *APIStore) createVolumeOnNode(ctx context.Context, client orchestrator.VolumeServiceClient, volume queries.Volume) (*orchestrator.CreateVolumeResponse, error) {
+	if a.volumeQuota.Manages(volume.VolumeType) {
+		fileSystemID, filesetPath := a.volumeQuota.Fileset(volume.VolumeType, volume.TeamID)
+		request := &orchestrator.CreateVolumeWithQuotaRequest{
+			Volume:       toVolumeKey(volume),
+			FileSystemId: fileSystemID,
+			FilesetPath:  filesetPath,
+		}
+		// Verify before committing the permanent fileset binding. A bad mount
+		// or path configuration must remain correctable without rewriting data.
+		if _, err := client.ValidateVolumeMount(ctx, request); err != nil {
+			return nil, quotaMountError(err)
+		}
+		if err := a.volumeQuota.EnsureTeamQuota(ctx, volume.VolumeType, volume.TeamID); err != nil {
+			return nil, fmt.Errorf("applying team volume quota: %w", err)
+		}
+		response, err := client.CreateVolumeWithQuota(ctx, request)
+
+		return response, quotaMountError(err)
+	}
+
+	return client.CreateVolume(ctx, &orchestrator.CreateVolumeRequest{Volume: toVolumeKey(volume)})
+}
+
+func quotaMountError(err error) error {
+	if status.Code(err) == codes.Unimplemented || status.Code(err) == codes.FailedPrecondition {
+		// Try another node during rollout or after a mount failure. The new
+		// attempt keeps the same volume ID and must verify its mount too.
+		return status.Errorf(codes.Unavailable, "node cannot verify volume quota mount: %v", err)
+	}
+
+	return err
 }

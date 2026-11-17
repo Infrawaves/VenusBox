@@ -101,6 +101,7 @@ type DefaultLimit struct {
 	ApiTeamRpsList           int64
 	ApiTeamRpsDelete         int64
 	MaxSecrets               int64
+	VolumeQuotaGib           int64
 }
 
 type Env struct {
@@ -188,6 +189,7 @@ type ProjectLimit struct {
 	ApiTeamRpsList           int64
 	MaxSecrets               int64
 	ApiTeamRpsDelete         int64
+	VolumeQuotaGib           pgtype.Int8
 }
 
 type ProjectionProjectBlock struct {
@@ -297,6 +299,15 @@ type TeamLimit struct {
 	MaxSecrets               int64
 }
 
+type TeamVolumeQuota struct {
+	TeamID       uuid.UUID
+	QuotaGib     pgtype.Int8
+	Revision     int64
+	FileSystemID pgtype.Text
+	FilesetPath  pgtype.Text
+	UpdatedAt    time.Time
+}
+
 type Tier struct {
 	ID     string
 	Name   string
@@ -347,4 +358,9 @@ type Volume struct {
 	Name       string
 	VolumeType string
 	CreatedAt  pgtype.Timestamptz
+}
+
+type VolumeQuotaDefault struct {
+	ID       bool
+	QuotaGib int64
 }

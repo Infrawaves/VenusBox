@@ -36,14 +36,15 @@ func TestWritesToADeletedProjectAnswerNotFoundAndChangeNothing(t *testing.T) {
 		path   string
 		body   string
 	}{
-		"project upsert":     {http.MethodPut, "/v1/management/projects/%s", `{"name":"restored","slug":"restored","email":"restored@example.test"}`},
-		"member delivery":    {http.MethodPut, "/v1/management/projects/%s/members/" + uuid.NewString(), `{"revision":1,"present":true,"identities":[{"issuer":"https://issuer.test","subject":"member"}]}`},
-		"limits delivery":    {http.MethodPut, "/v1/management/projects/%s/limits", validLimitsBody},
-		"block delivery":     {http.MethodPut, "/v1/management/projects/%s/block", `{"revision":1,"blocked":false}`},
-		"cluster assignment": {http.MethodPut, "/v1/management/projects/%s/cluster/" + clusterID.String(), ""},
-		"cluster detachment": {http.MethodDelete, "/v1/management/projects/%s/cluster/" + clusterID.String(), ""},
-		"admin ban":          {http.MethodPut, "/admin/teams/%s/ban", ""},
-		"admin unban":        {http.MethodDelete, "/admin/teams/%s/ban", ""},
+		"project upsert":        {http.MethodPut, "/v1/management/projects/%s", `{"name":"restored","slug":"restored","email":"restored@example.test"}`},
+		"member delivery":       {http.MethodPut, "/v1/management/projects/%s/members/" + uuid.NewString(), `{"revision":1,"present":true,"identities":[{"issuer":"https://issuer.test","subject":"member"}]}`},
+		"limits delivery":       {http.MethodPut, "/v1/management/projects/%s/limits", validLimitsBody},
+		"volume quota delivery": {http.MethodPut, "/v1/management/projects/%s/volume-quota", `{"revision":1,"quota_gib":100}`},
+		"block delivery":        {http.MethodPut, "/v1/management/projects/%s/block", `{"revision":1,"blocked":false}`},
+		"cluster assignment":    {http.MethodPut, "/v1/management/projects/%s/cluster/" + clusterID.String(), ""},
+		"cluster detachment":    {http.MethodDelete, "/v1/management/projects/%s/cluster/" + clusterID.String(), ""},
+		"admin ban":             {http.MethodPut, "/admin/teams/%s/ban", ""},
+		"admin unban":           {http.MethodDelete, "/admin/teams/%s/ban", ""},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()

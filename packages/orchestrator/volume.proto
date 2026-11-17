@@ -179,9 +179,20 @@ message UpdatePathResponse {
   EntryInfo entry = 1;
 }
 
+// Quota-managed volumes use a separate RPC so an older orchestrator cannot
+// silently ignore the storage identity checks and create an unbounded volume.
+message CreateVolumeWithQuotaRequest {
+  VolumeInfo volume = 1;
+  string file_system_id = 2;
+  string fileset_path = 3;
+}
+
 service VolumeService {
   // volume operations
   rpc CreateVolume(CreateVolumeRequest) returns (CreateVolumeResponse);
+  // Check quota storage identity without creating any directories.
+  rpc ValidateVolumeMount(CreateVolumeWithQuotaRequest) returns (CreateVolumeResponse);
+  rpc CreateVolumeWithQuota(CreateVolumeWithQuotaRequest) returns (CreateVolumeResponse);
   rpc DeleteVolume(DeleteVolumeRequest) returns (DeleteVolumeResponse);
 
   // directory operations

@@ -20,6 +20,7 @@ import (
 	"github.com/e2b-dev/infra/packages/auth/pkg/types"
 	"github.com/e2b-dev/infra/packages/db/pkg/dberrors"
 	"github.com/e2b-dev/infra/packages/db/queries"
+	"github.com/e2b-dev/infra/packages/shared/pkg/consts"
 	"github.com/e2b-dev/infra/packages/shared/pkg/featureflags"
 	"github.com/e2b-dev/infra/packages/shared/pkg/grpc/orchestrator"
 	"github.com/e2b-dev/infra/packages/shared/pkg/logger"
@@ -80,13 +81,21 @@ func (a *APIStore) getVolume(c *gin.Context, volumeID string) (queries.Volume, *
 
 var ErrClusterNotFound = errors.New("cluster not found")
 
+// usesCustomCluster reports whether the team runs on a custom (BYOC) cluster.
+// A team row may carry the local cluster's own ID (the zero UUID) instead of
+// NULL; that is the default cluster, not a custom one, so it gets the
+// deployment's volume type and domain rather than the BYOC placeholder.
+func usesCustomCluster(team *types.Team) bool {
+	return team != nil && team.ClusterID != nil && *team.ClusterID != consts.LocalClusterID
+}
+
 // volumeContentDomain resolves the domain the SDK should use as the destination
 // for volume content requests. Teams connected to a custom (BYOC) cluster get
 // that cluster's domain, which the SDK uses in place of the default
 // api.<E2B_DOMAIN> host. Teams on the default cluster get nil, leaving the SDK
 // on its configured default.
 func (a *APIStore) volumeContentDomain(team *types.Team) (*string, error) {
-	if team.ClusterID == nil {
+	if !usesCustomCluster(team) {
 		return nil, nil
 	}
 
