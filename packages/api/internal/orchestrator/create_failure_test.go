@@ -10,7 +10,6 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
-
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 

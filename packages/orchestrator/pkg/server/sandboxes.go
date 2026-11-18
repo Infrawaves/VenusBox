@@ -927,8 +927,7 @@ func markResumedSandboxEnded(ctx context.Context, resumedSbx *sandbox.Sandbox) {
 	if cause := context.Cause(ctx); errors.Is(cause, errCheckpointDeleted) {
 		// The kill is published on the original sandbox; the resumed one has
 		// its own metadata, so its execution-end summary needs the reason too.
-		var deleted *deletedDuringCheckpointError
-		if errors.As(cause, &deleted) {
+		if deleted, ok := errors.AsType[*deletedDuringCheckpointError](cause); ok {
 			resumedSbx.SetKillReason(deleted.killReason)
 		}
 		resumedSbx.SetStopReason(sandbox.StopReasonKilled)
