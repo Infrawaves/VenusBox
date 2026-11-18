@@ -136,6 +136,10 @@ func (u *Upload) uploadFramed(
 		return fmt.Errorf("store %s header: %w", fileType, err)
 	}
 
+	if u.uploads != nil {
+		u.uploads.publishTOSLayerEvent(ctx, u.buildID, u.objectMetadata[storage.ObjectMetadataTemplateID], fileType, srcHeader.Mapping, storage.ObjectOrigin(u.objectMetadata[storage.ObjectMetadataBuildOrigin]))
+	}
+
 	return u.publish(ctx, fileType, h)
 }
 

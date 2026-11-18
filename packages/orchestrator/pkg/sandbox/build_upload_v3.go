@@ -146,6 +146,9 @@ func (u *Upload) runV3(ctx context.Context) error {
 		if err := u.appendAncestorBuilds(ctx, nil, memfileDiffHeader.Mapping, build.Memfile); err != nil {
 			return err
 		}
+		if u.uploads != nil {
+			u.uploads.publishTOSLayerEvent(ctx, u.buildID, u.objectMetadata[storage.ObjectMetadataTemplateID], build.Memfile, memfileDiffHeader.Mapping, storage.ObjectOrigin(u.objectMetadata[storage.ObjectMetadataBuildOrigin]))
+		}
 	}
 	if h := finalizeV3(memfileDiffHeader); h != nil {
 		if err := u.publish(ctx, build.Memfile, h); err != nil {
@@ -156,6 +159,9 @@ func (u *Upload) runV3(ctx context.Context) error {
 	if rootfsDiffHeader != nil {
 		if err := u.appendAncestorBuilds(ctx, nil, rootfsDiffHeader.Mapping, build.Rootfs); err != nil {
 			return err
+		}
+		if u.uploads != nil {
+			u.uploads.publishTOSLayerEvent(ctx, u.buildID, u.objectMetadata[storage.ObjectMetadataTemplateID], build.Rootfs, rootfsDiffHeader.Mapping, storage.ObjectOrigin(u.objectMetadata[storage.ObjectMetadataBuildOrigin]))
 		}
 	}
 	if h := finalizeV3(rootfsDiffHeader); h != nil {

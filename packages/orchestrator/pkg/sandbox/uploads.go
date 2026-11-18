@@ -4,6 +4,7 @@ package sandbox
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -250,7 +251,82 @@ func (u *Uploads) find(ctx context.Context, buildID uuid.UUID, t build.DiffType)
 	return dev, release, err
 }
 
-// --- Cross-orch upload-done signaling (Redis pub/sub on per-build channels) ---
+// --- TOS layer reference-counting event publishing (Redis List, best-effort) ---
+
+// tosLayerEventsListKey is a plain Redis List (not the webhook-gated RedisStreamsDelivery used elsewhere); production hardening (Streams, consumer groups, ack/retry) is tracked separately.
+const tosLayerEventsListKey = "tos.layer.ref.events"
+
+// tosLayerEvent is pushed once per (build_id, file_type) after its header is
+// durably written to TOS, carrying everything the consumer needs to record
+// the dependency edges and bump the ancestor reference counts.
+type tosLayerEvent struct {
+	BuildID     string   `json:"build_id"`
+	EnvID       string   `json:"env_id"` // empty when the caller had no template_id in objectMetadata (e.g. dev tooling)
+	FileType    string   `json:"file_type"`
+	AncestorIDs []string `json:"ancestor_ids"`
+	EventType   string   `json:"event_type"` // "upload" (this is the only producer for now)
+	Timestamp   int64    `json:"timestamp"`  // unix seconds
+}
+
+// publishTOSLayerEvent pushes a tosLayerEvent for the given build's header onto a Redis List; a publish failure is logged and swallowed, never returned.
+//
+// Skips intermediate per-step cache layers (buildOrigin == ObjectOriginTemplateBuildCache) since each one's Mapping.Builds() already contains the full ancestor chain, so publishing every layer would duplicate edges.
+//
+// envID (storage.ObjectMetadataTemplateID, same string as envs.id/env_builds.env_id) is carried on the edge so a template soft-delete can clear every edge it ever produced in one pass.
+
+// tosLayerRefCountEventsEnabled reads TOSLayerRefCountEventsFlag; a nil client resolves to the flag's fallback (on).
+func (u *Uploads) tosLayerRefCountEventsEnabled(ctx context.Context) bool {
+	if u.ff == nil {
+		return featureflags.TOSLayerRefCountEventsFlag.Fallback()
+	}
+
+	return u.ff.BoolFlag(ctx, featureflags.TOSLayerRefCountEventsFlag)
+}
+
+func (u *Uploads) publishTOSLayerEvent(ctx context.Context, buildID uuid.UUID, envID string, fileType build.DiffType, mapping header.Mapping, buildOrigin storage.ObjectOrigin) {
+	if u.redis == nil {
+		return
+	}
+
+	if buildOrigin == storage.ObjectOriginTemplateBuildCache {
+		return
+	}
+
+	if !u.tosLayerRefCountEventsEnabled(ctx) {
+		return
+	}
+
+	ancestorIDs := mapping.Builds()
+	ancestorStrs := make([]string, 0, len(ancestorIDs))
+	for _, id := range ancestorIDs {
+		ancestorStrs = append(ancestorStrs, id.String())
+	}
+
+	payload, err := json.Marshal(tosLayerEvent{
+		BuildID:     buildID.String(),
+		EnvID:       envID,
+		FileType:    string(fileType),
+		AncestorIDs: ancestorStrs,
+		EventType:   "upload",
+		Timestamp:   time.Now().Unix(),
+	})
+	if err != nil {
+		logger.L().Warn(ctx, "failed to marshal tos layer event",
+			logger.WithBuildID(buildID.String()),
+			zap.Error(err),
+		)
+
+		return
+	}
+
+	if err := u.redis.LPush(ctx, tosLayerEventsListKey, payload).Err(); err != nil {
+		logger.L().Warn(ctx, "failed to publish tos layer event",
+			logger.WithBuildID(buildID.String()),
+			zap.String("file_type", string(fileType)),
+			zap.Error(err),
+		)
+	}
+}
 
 func uploadDoneChannel(buildID uuid.UUID) string {
 	return uploadDoneChannelPrefix + buildID.String()

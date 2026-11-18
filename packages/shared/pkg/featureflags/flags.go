@@ -224,6 +224,9 @@ var (
 	// (fail closed) instead of only emitting a metric + log. Requires the check flag.
 	StorageSoftDeleteEnforceFlag = NewBoolFlag("storage-soft-delete-enforce", false)
 
+	// TOSLayerRefCountEventsFlag is the kill switch for publishTOSLayerEvent (uploads.go); off skips the LPUSH, and tos-layer-scan can backfill any edges missed. Defaults on: the rollout plan is to deploy tos-ref-count-consumer and create its tables before rolling this orchestrator build out, so the LPUSH target is draining from the moment any node starts publishing.
+	TOSLayerRefCountEventsFlag = NewBoolFlag("tos-layer-ref-count-events", true)
+
 	// UseMemFdFlag asks Firecracker to back guest memory with a memfd and
 	// pass the fd over the UFFD socket; the orchestrator then mmaps it
 	// directly instead of using process_vm_readv on pause.
