@@ -34,6 +34,10 @@ const (
 	// node.id and reason: no_capacity (the orchestrator reports no pool
 	// ceiling) | no_page_size. The limit was a no-op for that placement.
 	ApiOrchestratorPlacementsWithoutHugepageCeiling CounterType = "api.orchestrator.placements_without_hugepage_ceiling"
+	// ApiOrchestratorCreateFailed counts sandbox creates and resumes that
+	// failed at placement, by error_code (the placement error code the API
+	// answers with), fault_domain (platform | unknown) and is_resume.
+	ApiOrchestratorCreateFailed CounterType = "api.orchestrator.create_failed"
 	// ApiSandboxListReads counts sandbox list requests by team and by how the
 	// team's store read was served: disabled (no lag allowed, own read) | read
 	// (started the shared read) | shared (joined one in flight) | hit (a live
@@ -879,6 +883,7 @@ var counterDesc = map[CounterType]string{
 	ClientProxyResumeParkingRejectedCounterName: "Requests shed with a 503 because the client proxy parking lot was full at their flight's first retry",
 
 	ApiOrchestratorPlacementsWithoutHugepageCeiling: "Hugepage sandboxes placed under a hugepage limit on a node the limit could not bound, by node and reason (no_capacity | no_page_size).",
+	ApiOrchestratorCreateFailed:                     "Sandbox creates and resumes that failed at placement, by error_code, fault_domain (platform | unknown) and is_resume.",
 }
 
 var counterUnits = map[CounterType]string{
@@ -969,6 +974,7 @@ var counterUnits = map[CounterType]string{
 	ApiRedisScriptCalls:                    "{call}",
 
 	ApiOrchestratorPlacementsWithoutHugepageCeiling: "{placement}",
+	ApiOrchestratorCreateFailed:                     "{sandbox}",
 }
 
 var observableCounterDesc = map[ObservableCounterType]string{

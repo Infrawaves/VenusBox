@@ -463,6 +463,7 @@ func (s *Sandbox) thawRootfsOrLose(ctx context.Context) error {
 	if err == nil {
 		return nil
 	}
+	s.SetKillReason(KillReasonThawFailed)
 	s.SetStopReason(StopReasonKilled)
 
 	return fmt.Errorf("rootfs thaw failed after in-place resume, sandbox torn down: %w",

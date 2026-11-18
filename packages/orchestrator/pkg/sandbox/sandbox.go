@@ -298,6 +298,7 @@ type Metadata struct {
 	endAt              time.Time
 	stoppedAt          time.Time
 	stopReason         StopReason
+	killReason         string
 	executionStartedAt time.Time
 }
 
@@ -738,6 +739,39 @@ func (m *Metadata) SetStopReason(reason StopReason) {
 	}
 
 	m.stopReason = reason
+}
+
+// Kill reasons for the teardowns this package does itself, recorded before the
+// Close so the execution-end summary has them; the server's killed counter and
+// event use the same values.
+const (
+	// KillReasonResumeFailed: the in-place resume after a checkpoint failed and
+	// the stuck-paused VM was torn down.
+	KillReasonResumeFailed = "resume_failed"
+	// KillReasonThawFailed: the resume succeeded but the rootfs stayed frozen.
+	KillReasonThawFailed = "thaw_failed"
+)
+
+// SetKillReason records the kill reason behind a killed stop reason, for the
+// execution-end summary. Call it next to SetStopReason(StopReasonKilled). The
+// first non-empty call wins, like SetStopReason.
+func (m *Metadata) SetKillReason(reason string) {
+	m.rwmu.Lock()
+	defer m.rwmu.Unlock()
+
+	if m.killReason != "" || reason == "" {
+		return
+	}
+
+	m.killReason = reason
+}
+
+// GetKillReason returns the recorded kill reason, "" when none was recorded.
+func (m *Metadata) GetKillReason() string {
+	m.rwmu.RLock()
+	defer m.rwmu.RUnlock()
+
+	return m.killReason
 }
 
 // MarkKilledDuringCheckpoint replaces a checkpointing stop reason with killed:
@@ -2575,6 +2609,7 @@ func (s *Sandbox) Pause(
 				// The stop reason must land BEFORE the Close or the
 				// lifecycle goroutine reads this orchestrator-chosen
 				// teardown as a guest crash.
+				s.SetKillReason(KillReasonResumeFailed)
 				s.SetStopReason(StopReasonKilled)
 
 				return fmt.Errorf(
@@ -2752,6 +2787,7 @@ func (s *Sandbox) Pause(
 			// instead of the healthy-sandbox FailedPrecondition. Stop reason
 			// BEFORE the Close, or this orchestrator-chosen teardown reads as
 			// a guest crash (ERROR log + stop_reason="crashed" sample).
+			s.SetKillReason(KillReasonResumeFailed)
 			s.SetStopReason(StopReasonKilled)
 
 			return nil, fmt.Errorf(

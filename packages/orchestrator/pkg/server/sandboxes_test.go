@@ -310,7 +310,8 @@ func TestRecordCrashWithoutFirecrackerProcess(t *testing.T) {
 	s := &Server{sandboxCrashedCounter: counter}
 
 	require.NotPanics(t, func() {
-		s.recordCrash(t.Context(), &sandbox.Sandbox{Metadata: &sandbox.Metadata{}}, nil)
+		sbx := &sandbox.Sandbox{Metadata: &sandbox.Metadata{}}
+		s.recordCrash(t.Context(), sbx, nil, classifyExecutionEnd(sbx, nil))
 	})
 
 	var rm metricdata.ResourceMetrics
@@ -369,7 +370,8 @@ func TestRecordCrashLabelsUffdCopyError(t *testing.T) {
 			require.NoError(t, err)
 
 			s := &Server{sandboxCrashedCounter: counter}
-			s.recordCrash(t.Context(), &sandbox.Sandbox{Metadata: &sandbox.Metadata{}}, tc.waitErr)
+			sbx := &sandbox.Sandbox{Metadata: &sandbox.Metadata{}}
+			s.recordCrash(t.Context(), sbx, tc.waitErr, classifyExecutionEnd(sbx, tc.waitErr))
 
 			var rm metricdata.ResourceMetrics
 			require.NoError(t, reader.Collect(t.Context(), &rm))
