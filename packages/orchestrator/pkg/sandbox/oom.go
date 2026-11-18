@@ -34,6 +34,17 @@ type OOMWatermark struct {
 	started    bool
 	seq        int64
 	seedFailed bool // the first poll sets the watermark instead
+	observed   int  // kills reported as new since the watermark was set
+}
+
+// Observed returns how many OOM kills metrics polls reported as new since the
+// watermark was set (an in-place checkpoint keeps the count). Kills after the
+// last poll are not counted.
+func (w *OOMWatermark) Observed() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	return w.observed
 }
 
 // Unseen returns the kills newer than the watermark, oldest first, and nothing before the seed.
@@ -88,6 +99,7 @@ func (w *OOMWatermark) advance(kills []envd.OOMKill) []envd.OOMKill {
 		}
 	}
 	w.started = true
+	w.observed += len(unseen)
 
 	return unseen
 }

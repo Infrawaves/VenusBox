@@ -565,7 +565,10 @@ func (o *Orchestrator) CreateSandbox(
 			o.maybeRemapResumeOriginNode(ctx, snapshotSandboxID, team, sbxData.NodeID, placed.WarmedNode)
 		}
 
-		return sandbox.Sandbox{}, placementAPIError(err)
+		apiErr := placementAPIError(err)
+		o.recordCreateFailure(ctx, apiErr, sandboxID, team.ID.String(), isResume)
+
+		return sandbox.Sandbox{}, apiErr
 	}
 
 	node = placed.Node

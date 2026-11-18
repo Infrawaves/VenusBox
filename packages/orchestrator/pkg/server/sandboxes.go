@@ -103,11 +103,11 @@ const (
 	// pause failure: a failed pause alone is survived via the cleanup resume,
 	// so the resume failing is always the lethal step; the full chain is in
 	// the joined error.
-	killReasonResumeFailed = "resume_failed"
+	killReasonResumeFailed = sandbox.KillReasonResumeFailed
 	// killReasonThawFailed: the resume succeeded but the rootfs stayed frozen
 	// through every thaw attempt (ErrSandboxLost tagged ErrRootfsThawFailed),
 	// so the orchestrator tore down a guest that ran but could not write.
-	killReasonThawFailed = "thaw_failed"
+	killReasonThawFailed = sandbox.KillReasonThawFailed
 	// killReasonUploadFailed: the sandbox resumed after a checkpoint went
 	// live and was torn down because its snapshot upload failed, leaving it
 	// unable to be paused or resumed later.
@@ -855,6 +855,7 @@ func (s *Server) Delete(ctxConn context.Context, in *orchestrator.SandboxDeleteR
 
 	sbxlogger.E(sbx).Info(ctx, "Killing sandbox", zap.String("kill_reason", killReason))
 
+	sbx.SetKillReason(killReason)
 	sbx.SetStopReason(sandbox.StopReasonKilled)
 
 	// Check health metrics before stopping the sandbox
@@ -923,7 +924,12 @@ func (s *Server) takeForDelete(ctx context.Context, in *orchestrator.SandboxDele
 // not a kill, and a sandbox with no reason reads as crashed once its
 // lifecycle goroutine sees it exit.
 func markResumedSandboxEnded(ctx context.Context, resumedSbx *sandbox.Sandbox) {
-	if errors.Is(context.Cause(ctx), errCheckpointDeleted) {
+	if cause := context.Cause(ctx); errors.Is(cause, errCheckpointDeleted) {
+		// The kill is published on the original sandbox; the resumed one has
+		// its own metadata, so its execution-end summary needs the reason too.
+		if deleted, ok := errors.AsType[*deletedDuringCheckpointError](cause); ok {
+			resumedSbx.SetKillReason(deleted.killReason)
+		}
 		resumedSbx.SetStopReason(sandbox.StopReasonKilled)
 
 		return
@@ -954,6 +960,9 @@ func (s *Server) emitSandboxKilled(ctx context.Context, sbx *sandbox.Sandbox, ki
 	teamID, buildId, eventsTTLDays, eventData := s.prepareSandboxEventData(ctx, sbx)
 	eventData[executionEventDataKey] = s.getSandboxExecutionData(sbx)
 	addKillReason(eventData, killReason)
+	// A no-op where the caller recorded it before the stop; covers the
+	// checkpoint paths, which learn the reason only here.
+	sbx.SetKillReason(killReason)
 	recordSandboxKill(ctx, s.sandboxKilledCounter, sbx.Runtime.TeamID, killReason)
 	s.publishEventAsync(
 		ctx,
@@ -1018,6 +1027,7 @@ func recordSandboxKill(ctx context.Context, counter metric.Int64Counter, teamID,
 
 	counter.Add(ctx, 1, metric.WithAttributes(
 		attribute.String("kill_reason", killReason),
+		faultDomainAttr(killFaultDomain(killReason)),
 		telemetry.WithTeamID(teamID),
 	))
 }
@@ -1042,19 +1052,19 @@ func (s *Server) recordExecutionDuration(ctx context.Context, sbx *sandbox.Sandb
 // recordCrash reports an execution that ended with no stop reason. The cause
 // separates a guest that halted itself from a Firecracker somebody else
 // killed: both leave a nil wait error.
-func (s *Server) recordCrash(ctx context.Context, sbx *sandbox.Sandbox, waitErr error) {
+func (s *Server) recordCrash(ctx context.Context, sbx *sandbox.Sandbox, waitErr error, end executionEnd) {
 	exitInfo := sbx.FirecrackerExit()
-	memoryHandlerErr := sbx.MemoryHandlerErr()
-	cause := crashCause(exitInfo, memoryHandlerErr)
+	cause := end.crashCause
 
 	s.sandboxCrashedCounter.Add(ctx, 1, metric.WithAttributes(
 		attribute.String("cause", string(cause)),
-		attribute.String("uffd_copy_error", string(classifyUffdCopyError(errors.Join(waitErr, memoryHandlerErr)))),
+		attribute.String("uffd_copy_error", string(end.uffdCopyError)),
+		faultDomainAttr(end.faultDomain),
 		telemetry.WithTeamID(sbx.Runtime.TeamID),
 	))
 
 	fields := append(
-		[]zap.Field{zap.Error(waitErr), zap.String("crash_cause", string(cause))},
+		[]zap.Field{zap.Error(waitErr), zap.String("crash_cause", string(cause)), zap.String("fault_domain", string(end.faultDomain))},
 		exitInfo.LogFields()...,
 	)
 
@@ -1266,6 +1276,7 @@ func (s *Server) Pause(ctx context.Context, in *orchestrator.SandboxPauseRequest
 	}
 	if persistErr != nil {
 		telemetry.ReportCriticalError(ctx, "sandbox cannot be persisted, killing it", persistErr, telemetry.WithSandboxID(in.GetSandboxId()))
+		sbx.SetKillReason(killReasonSealFailed)
 		sbx.SetStopReason(sandbox.StopReasonKilled)
 		s.stopSandboxAsync(context.WithoutCancel(ctx), sbx)
 
@@ -2094,6 +2105,8 @@ func (s *Server) getSandboxExecutionData(sbx *sandbox.Sandbox) map[string]any {
 // A Delete that took it out first has published them.
 func (s *Server) killResumedOnUploadFailure(ctx context.Context, resumedSbx *sandbox.Sandbox) {
 	resumedSbx.SetStopReason(sandbox.StopReasonKilled)
+	// The kill reason is recorded by emitSandboxKilled, only once MarkStopping
+	// wins: a Delete that took the sandbox first records its own.
 	if s.sandboxFactory.Sandboxes.MarkStopping(ctx, resumedSbx.Runtime.SandboxID, resumedSbx.LifecycleID) {
 		s.emitSandboxKilled(ctx, resumedSbx, killReasonUploadFailed)
 	}
@@ -2466,12 +2479,14 @@ func (s *Server) setupSandboxLifecycle(ctx context.Context, sbx *sandbox.Sandbox
 
 		// A guest that dies cleanly leaves no wait error, so the log above
 		// misses it.
-		if sbx.GetStopReason() == sandbox.StopReasonCrashed {
-			s.recordCrash(ctx, sbx, waitErr)
+		end := classifyExecutionEnd(sbx, waitErr)
+		if end.stopReason == sandbox.StopReasonCrashed {
+			s.recordCrash(ctx, sbx, waitErr, end)
 		}
 
 		// Every ending — kill, pause, checkpoint hand-off, crash — passes here.
 		s.recordExecutionDuration(ctx, sbx)
+		s.logExecutionEnd(ctx, sbx, end)
 
 		cleanupErr := sbx.Close(ctx)
 		if cleanupErr != nil {
