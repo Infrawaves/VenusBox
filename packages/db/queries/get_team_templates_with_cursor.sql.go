@@ -58,7 +58,7 @@ LEFT JOIN LATERAL (
     LIMIT 1
 ) eb ON TRUE
 WHERE
-    e.team_id = $1::uuid AND e.source = 'template'
+    (e.team_id = $1::uuid OR e.public = true) AND e.source = 'template'
     AND (e.created_at, e.id) < ($2::timestamptz, $3::text)
 ORDER BY e.created_at DESC, e.id DESC
 LIMIT $4::int

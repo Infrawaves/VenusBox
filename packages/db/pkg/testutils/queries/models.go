@@ -270,6 +270,31 @@ type TeamApiKey struct {
 	ApiKeyMaskSuffix string
 }
 
+type TosAncestorReferenceCount struct {
+	AncestorID uuid.UUID
+	RefCount   int32
+	UpdatedAt  time.Time
+}
+
+type TosBuildEdge struct {
+	BuildID    uuid.UUID
+	AncestorID uuid.UUID
+	EnvID      string
+	Source     string
+	RecordedAt time.Time
+	DeletedAt  *time.Time
+}
+
+type TosBuildEdgesWithEnv struct {
+	BuildID          uuid.UUID
+	AncestorID       uuid.UUID
+	EnvID            string
+	Source           string
+	RecordedAt       time.Time
+	DeletedAt        *time.Time
+	EnvLastSpawnedAt *time.Time
+}
+
 type User struct {
 	CreatedAt time.Time
 	UpdatedAt time.Time
