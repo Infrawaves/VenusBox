@@ -49,7 +49,7 @@ LEFT JOIN LATERAL (
     LIMIT 1
 ) eb ON TRUE
 WHERE
-    e.team_id = sqlc.arg(team_id)::uuid AND e.source = 'template'
+    (e.team_id = sqlc.arg(team_id)::uuid OR e.public = true) AND e.source = 'template'
     AND (e.created_at, e.id) < (sqlc.arg(cursor_created_at)::timestamptz, sqlc.arg(cursor_id)::text)
 ORDER BY e.created_at DESC, e.id DESC
 LIMIT sqlc.arg(limit_plus_one)::int;

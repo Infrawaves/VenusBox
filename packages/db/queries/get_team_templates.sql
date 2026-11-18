@@ -36,7 +36,7 @@ LEFT JOIN LATERAL (
     LIMIT 1
 ) eb ON TRUE
 WHERE
-  e.team_id = sqlc.arg(team_id)
+  (e.team_id = sqlc.arg(team_id) OR e.public = true)
   AND e.source = 'template'
 ORDER BY e.created_at ASC
 LIMIT sqlc.narg(limit_plus_one)::int;
