@@ -210,7 +210,7 @@ delivery or cache refresh is pending.
   back; with nothing tearing down it fails at once and says why. Off, it fails
   as an internal error and the node is excluded. Independently, any node whose hugepage pool
   (used + reserved, over `HugePages_Total`) is at or above `hugepages-max-usage-percentage`
-  (default 70%, `HUGEPAGES_MAX_USAGE_PERCENTAGE` without LaunchDarkly; 0 disables) is skipped,
+  (default 85%, `HUGEPAGES_MAX_USAGE_PERCENTAGE` without LaunchDarkly; 0 disables) is skipped,
   leaving the rest of the pool for running sandboxes to fault into; the orchestrator re-checks
   its own pool on `Create` and answers `ResourceExhausted`.
 - **State**: writes sandbox records to Redis (source of truth for *running* sandboxes). It does

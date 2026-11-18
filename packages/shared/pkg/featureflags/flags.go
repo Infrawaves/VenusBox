@@ -562,9 +562,9 @@ func placementHugepageEstimatePercentFallback() int {
 }
 
 func hugePagesMaxUsagePercentageFallback() int {
-	v, err := env.GetEnvAsInt("HUGEPAGES_MAX_USAGE_PERCENTAGE", 70)
+	v, err := env.GetEnvAsInt("HUGEPAGES_MAX_USAGE_PERCENTAGE", 85)
 	if err != nil {
-		return 70
+		return 85
 	}
 
 	return v
