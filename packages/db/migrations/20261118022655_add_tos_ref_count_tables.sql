@@ -1,5 +1,7 @@
 -- +goose Up
 -- +goose StatementBegin
+-- Not yet run anywhere: this rollout still hand-applies packages/orchestrator/cmd/tos-ref-count-consumer/schema.sql, which these statements mirror. Kept here, ready to run once this feature moves off manual schema management -- CREATE TABLE IF NOT EXISTS/CREATE OR REPLACE VIEW make it a no-op against a database that already has the hand-applied tables.
+--
 -- Table 1: edges, one row per "build_id depends on ancestor_id". Only makes the ref_count +1/-1 below idempotent under at-least-once delivery -- not queried to decide whether a build can be deleted.
 --
 -- env_id (envs.id / env_builds.env_id) lets a template soft-delete clear every edge it ever produced in one pass, without re-querying env_builds/env_build_assignments for build history.
