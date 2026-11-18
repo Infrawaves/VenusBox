@@ -18,13 +18,12 @@ require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.49.0
 	github.com/Merovius/nbd v0.0.0-20240812113926-fd65a54c9949
 	github.com/RoaringBitmap/roaring/v2 v2.30.0
-	github.com/bsm/redislock v0.10.0
-	github.com/jackc/pgx/v5 v5.12.0
 	github.com/aws/aws-sdk-go-v2/config v1.33.9
 	github.com/aws/aws-sdk-go-v2/credentials v1.20.9
 	github.com/aws/aws-sdk-go-v2/service/ecr v1.67.1
 	github.com/bits-and-blooms/bitset v1.24.5
 	github.com/bmatcuk/doublestar/v4 v4.10.0
+	github.com/bsm/redislock v0.10.0
 	github.com/caarlos0/env/v11 v11.3.1
 	github.com/containernetworking/plugins v1.9.0
 	github.com/coreos/go-iptables v0.8.0
@@ -45,6 +44,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/inetaf/tcpproxy v0.0.0-20250222171855-c4b9df066048
+	github.com/jackc/pgx/v5 v5.12.0
 	github.com/jellydator/ttlcache/v3 v3.4.0
 	github.com/launchdarkly/go-sdk-common/v3 v3.3.0
 	github.com/launchdarkly/go-server-sdk/v7 v7.13.0
@@ -199,6 +199,9 @@ require (
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.31.0 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
 	github.com/hashicorp/go-retryablehttp v0.7.8 // indirect
+	github.com/jackc/pgpassfile v1.0.0 // indirect
+	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
+	github.com/jackc/puddle/v2 v2.2.3 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/compress v1.20.3 // indirect
@@ -281,6 +284,7 @@ require (
 	go.opentelemetry.io/otel/log v1.47.0 // indirect
 	go.opentelemetry.io/otel/sdk/log v1.47.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.11.1 // indirect
+	go.segfaultmedaddy.com/redistest v0.2.0 // indirect
 	go.uber.org/atomic v1.12.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
