@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -135,15 +136,7 @@ func (c *Consumer) ApplyUploadEvent(ctx context.Context, buildID uuid.UUID, envI
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // rollback is a no-op after Commit
 
-	selfReferenced := false
-	for _, id := range ancestorIDs {
-		if id == buildID {
-			selfReferenced = true
-
-			break
-		}
-	}
-	if !selfReferenced {
+	if !slices.Contains(ancestorIDs, buildID) {
 		ancestorIDs = append(ancestorIDs, buildID)
 	}
 
