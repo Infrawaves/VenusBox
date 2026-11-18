@@ -93,6 +93,7 @@ flowchart TB
 | Client proxy | `packages/client-proxy` | API nodes | Edge router: sandbox URL → correct node |
 | Envd | `packages/envd` | inside every VM | In-VM agent: process/filesystem API for SDKs |
 | Dashboard API | `packages/dashboard-api` | API nodes | Backend for the web dashboard (templates, builds, admin) |
+| TOS ref-count consumer | `packages/orchestrator/cmd/tos-ref-count-consumer` | one instance, any node | Tracks which template-storage layers are still referenced; see "TOS layer reference counting" |
 
 Supporting packages: `packages/shared` (protos, telemetry, storage clients, feature flags),
 `packages/auth` (authentication library), `packages/db` (Postgres migrations + sqlc queries),
@@ -634,8 +635,8 @@ user's team list. Volumes, builds and stored artifacts are not reclaimed.
 
 | Store | Owner packages | What lives there |
 |---|---|---|
-| **PostgreSQL** | `packages/db` (goose migrations, sqlc) | Durable control-plane state: `teams`, `users`, `default_limits` (the one row of upstream quota defaults), `project_limits` (per-team quota overrides pushed in by the owning service; the team lookups read it in preference to `default_limits`), `volume_quota_defaults` and `team_volume_quotas` (independent volume capacity settings, revision and filesystem/path binding), `tiers` and `addons` (read for limits only by the legacy `team_limits` view), `envs` (templates), `env_builds` (build rows: vcpu, ram_mb, status, versions), `env_aliases`, `snapshots` (paused sandboxes), `team_api_keys`, `volumes`, `clusters` |
-| **Redis** | API, client-proxy, orchestrator | Ephemeral runtime state: running-sandbox store (source of truth), sandbox→node routing catalog, team/template/snapshot caches, rate limiting, P2P chunk peer registry |
+| **PostgreSQL** | `packages/db` (goose migrations, sqlc) | Durable control-plane state: `teams`, `users`, `default_limits` (the one row of upstream quota defaults), `project_limits` (per-team quota overrides pushed in by the owning service; the team lookups read it in preference to `default_limits`), `volume_quota_defaults` and `team_volume_quotas` (independent volume capacity settings, revision and filesystem/path binding), `tiers` and `addons` (read for limits only by the legacy `team_limits` view), `envs` (templates), `env_builds` (build rows: vcpu, ram_mb, status, versions), `env_aliases`, `snapshots` (paused sandboxes), `team_api_keys`, `volumes`, `clusters`, `tos_build_edges` and `tos_ancestor_reference_count` (TOS layer reference counting, see "TOS layer reference counting") |
+| **Redis** | API, client-proxy, orchestrator, tos-ref-count-consumer | Ephemeral runtime state: running-sandbox store (source of truth), sandbox→node routing catalog, team/template/snapshot caches, rate limiting, P2P chunk peer registry, `tos.layer.ref.events`/`tos.layer.ref.events.processing` (TOS layer reference-count event queue) |
 | **ClickHouse** | `packages/clickhouse` | Time-series/analytics: `metrics_gauge`/`metrics_sum` (written by the OTel collector), `sandbox_events`, `sandbox_host_stats` (written by orchestrator), team metrics, and optionally `sandbox_logs` during the log migration. Read by API and dashboard-api |
 | **Object storage** (GCS/S3/local, `packages/shared/pkg/storage`) | orchestrator, template-manager | Template & snapshot artifacts, keyed by build ID: `{buildID}/memfile`, `{buildID}/rootfs.ext4`, `{buildID}/snapfile`, `{buildID}/metadata.json` + `.header` index files |
 
@@ -1234,6 +1235,35 @@ build deletion owns a separate hold until object-storage cleanup returns.
 storage. It does not delete container registry images; build outputs are VM snapshots in
 object storage.
 
+### TOS layer reference counting
+
+Template layers (memfile/rootfs headers) can be shared as ancestors across many builds (snapshots
+diff against the template they came from — see "A template and a paused-sandbox snapshot have the
+same artifact shape" above). Deciding when a layer in object storage is safe to delete requires
+knowing whether any live build still depends on it; this is what the TOS ref-count consumer tracks.
+
+- **Producer** (`packages/orchestrator/pkg/sandbox/uploads.go`, `publishTOSLayerEvent`): after each
+  build/pause header upload, LPUSHes a JSON event (`build_id`, `env_id`, the ancestor build IDs from
+  the header's `Mapping.Builds()`) onto the Redis list `tos.layer.ref.events`. Gated by the
+  `tos-layer-ref-count-events` LaunchDarkly flag (default **off** — turn on only once a consumer is
+  deployed and running, since nothing expires the list and it grows unbounded with no consumer
+  draining it). Skips the intermediate per-step cache layers inside one build's own pipeline to avoid
+  recording the same ancestor chain once per layer.
+- **Consumer** (`packages/orchestrator/cmd/tos-ref-count-consumer`, package `pkg/tosrefcount`): a
+  standalone binary, deployed and scaled independently of the orchestrator binary, that BLMOVEs
+  events from `tos.layer.ref.events` into `tos.layer.ref.events.processing` (removed only after the
+  write commits, so a crash or transient failure leaves the event for retry instead of losing it —
+  edge inserts are idempotent, so redelivery is safe), and writes `tos_build_edges` (dependency
+  edges, including an explicit self-reference per build) and `tos_ancestor_reference_count` (live
+  reference counts) in PostgreSQL. A second loop polls `envs.deleted_at` and clears the edges of
+  soft-deleted templates, decrementing the counts. An optional `TOS_REF_COUNT_TEAM_FILTER` env var
+  restricts that soft-delete scan to a rollout set of teams during staged validation; event
+  consumption itself is never filtered. `cmd/tos-layer-scan` plus the consumer's `backfill`
+  subcommand can reconstruct edges for builds that predate this feature from the existing storage
+  artifacts.
+- No code reads `tos_ancestor_reference_count` to actually delete anything yet; this currently only
+  maintains the reference counts for a future cleanup job to consume.
+
 ## Deployment topology
 
 The services are scheduler-agnostic binaries and containers; the supported way to run them is the
@@ -1270,6 +1300,9 @@ flowchart TB
 - **Sandbox nodes** run the orchestrator directly on the host (it needs root for Firecracker,
   namespaces, NBD, cgroups), configured with hugepages and local template caches. Autoscaled.
 - **Build nodes** run the same binary in template-manager mode.
+- **TOS ref-count consumer** (`cmd/tos-ref-count-consumer`) is a single long-running instance
+  (any node with network access to Redis and PostgreSQL); a Redis-backed leader lock makes
+  running more than one replica safe if ever needed. See "TOS layer reference counting".
 - PostgreSQL is external (connection string via secrets); Redis is a managed service or a
   single in-cluster instance; ClickHouse runs on its own nodes.
 - Observability: everything exports OTel; the collector fans out to ClickHouse (product metrics)
