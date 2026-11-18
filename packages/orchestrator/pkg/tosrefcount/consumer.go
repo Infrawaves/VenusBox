@@ -24,6 +24,12 @@ import (
 // EventsListKey is the Redis List publishTOSLayerEvent pushes onto.
 const EventsListKey = "tos.layer.ref.events"
 
+// processingListKey holds events BLMOVEd out of EventsListKey while they're being applied, so a crash or transient
+// HandleEvent failure leaves the event sitting here instead of gone for good — BRPOP pops and removes atomically,
+// which made every such failure a silent, permanent drop. An event is LREMed from this list only after it's been
+// applied successfully; ApplyUploadEvent's ON CONFLICT DO NOTHING on the edge insert makes redelivery safe.
+const processingListKey = "tos.layer.ref.events.processing"
+
 // Event mirrors pkg/sandbox/uploads.go's tosLayerEvent, kept as an independent copy since the two sides talk over JSON on a Redis List, not a Go import.
 type Event struct {
 	BuildID     string   `json:"build_id"`
@@ -46,16 +52,17 @@ func New(pool *pgxpool.Pool, teamFilter []uuid.UUID) *Consumer {
 	return &Consumer{pool: pool, teamFilter: teamFilter}
 }
 
-// ConsumeEvents blocks, draining EventsListKey via BRPOP until ctx is canceled; a handling failure for one event is logged and dropped, not retried (redelivery belongs to a future queue, see tos-reference-counting-plan.md §10).
+// ConsumeEvents blocks, draining EventsListKey via BLMOVE into processingListKey until ctx is canceled. A handling
+// failure leaves the event in processingListKey for the next tick to retry (redelivery guarantees beyond that
+// belong to a future queue, see tos-reference-counting-plan.md §10) instead of losing it the way a plain BRPOP would.
 func (c *Consumer) ConsumeEvents(ctx context.Context, rdb redis.UniversalClient) error {
 	for {
 		if ctx.Err() != nil {
 			return nil //nolint:nilerr // graceful shutdown, not a failure
 		}
 
-		// BRPOP blocks for up to 5s so the loop can observe ctx cancellation
-		// between pops instead of blocking indefinitely.
-		res, err := rdb.BRPop(ctx, 5*time.Second, EventsListKey).Result()
+		// BLMOVE blocks for up to 5s so the loop can observe ctx cancellation between pops instead of blocking indefinitely.
+		payload, err := rdb.BLMove(ctx, EventsListKey, processingListKey, "right", "left", 5*time.Second).Result()
 		if errors.Is(err, redis.Nil) {
 			continue // timeout, no event — loop back and recheck ctx
 		}
@@ -64,7 +71,7 @@ func (c *Consumer) ConsumeEvents(ctx context.Context, rdb redis.UniversalClient)
 				return nil //nolint:nilerr // graceful shutdown, not a failure
 			}
 
-			logger.L().Warn(ctx, "tos-ref-count: brpop error", zap.Error(err))
+			logger.L().Warn(ctx, "tos-ref-count: blmove error", zap.Error(err))
 
 			select {
 			case <-ctx.Done():
@@ -75,9 +82,14 @@ func (c *Consumer) ConsumeEvents(ctx context.Context, rdb redis.UniversalClient)
 			continue
 		}
 
-		// res[0] is the key name, res[1] is the popped value.
-		if err := c.HandleEvent(ctx, res[1]); err != nil {
-			logger.L().Warn(ctx, "tos-ref-count: handle event failed, dropping", zap.Error(err))
+		if err := c.HandleEvent(ctx, payload); err != nil {
+			logger.L().Warn(ctx, "tos-ref-count: handle event failed, left in processing list for retry", zap.Error(err))
+
+			continue
+		}
+
+		if err := rdb.LRem(ctx, processingListKey, 1, payload).Err(); err != nil {
+			logger.L().Warn(ctx, "tos-ref-count: failed to remove applied event from processing list", zap.Error(err))
 		}
 	}
 }
