@@ -19,7 +19,6 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -160,9 +159,18 @@ func runBackfill(ctx context.Context, args []string) {
 	log.Printf("backfill complete: %d build(s) processed, %d failed", processed, failed)
 }
 
+// parsedLine is a batch.json line that parsed successfully and had every artifact's header read, paired with the
+// buildID/ancestorIDs backfillLineTx needs — split out so runBackfillBatch can look up every line's env_id in one
+// round trip instead of one SELECT per line.
+type parsedLine struct {
+	buildID     uuid.UUID
+	ancestorIDs []uuid.UUID
+}
+
 // runBackfillBatch applies every line in batch within a single transaction, logging and skipping (not aborting the
 // batch for) any line that fails to parse or whose header wasn't read — matching backfillLine's prior per-line
-// semantics, just sharing one commit across the whole batch instead of paying one per line.
+// semantics, just sharing one commit and one bulk env_id lookup across the whole batch instead of paying a round
+// trip per line for each.
 func runBackfillBatch(ctx context.Context, pool *pgxpool.Pool, batch [][]byte) (processed, failed int) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
@@ -170,8 +178,25 @@ func runBackfillBatch(ctx context.Context, pool *pgxpool.Pool, batch [][]byte) (
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // rollback is a no-op after Commit
 
+	var parsed []parsedLine
 	for _, line := range batch {
-		if err := backfillLineTx(ctx, tx, line); err != nil {
+		p, err := parseBackfillLine(line)
+		if err != nil {
+			log.Printf("backfill line failed, skipping: %s", err)
+			failed++
+
+			continue
+		}
+		parsed = append(parsed, p)
+	}
+
+	envIDs, err := lookupEnvIDsTx(ctx, tx, parsed)
+	if err != nil {
+		log.Fatalf("bulk env_id lookup: %s", err)
+	}
+
+	for _, p := range parsed {
+		if err := tosrefcount.ApplyUploadEventTx(ctx, tx, p.buildID, p.ancestorIDs, envIDs[p.buildID], "backfill_scan"); err != nil {
 			log.Printf("backfill line failed, skipping: %s", err)
 			failed++
 
@@ -198,30 +223,32 @@ type scanLine struct {
 	} `json:"artifacts"`
 }
 
-// backfillLineTx applies one tos-layer-scan JSON Lines row within tx: unions ancestor_builds across the build's artifacts, looks up its owning env_id from env_builds, and writes the edges.
+// parseBackfillLine decodes one tos-layer-scan JSON Lines row and unions ancestor_builds across its artifacts. It
+// touches no database — the env_id lookup is batched separately across the whole runBackfillBatch batch — so a
+// parse/validation failure here costs nothing beyond this one line.
 //
 // Every artifact's header must have been read successfully. A missing/unreadable header (HeaderFound=false) is treated as a failure for the whole line, not a partial success — tos-layer-scan reports every build's memfile and rootfs header as present (see inspectArtifact), so a false HeaderFound here means the ancestors unique to that artifact were never counted, and silently continuing would make the edge set (and any future reclamation decision based on it) wrong rather than merely incomplete.
-func backfillLineTx(ctx context.Context, tx pgx.Tx, line []byte) error {
+func parseBackfillLine(line []byte) (parsedLine, error) {
 	var row scanLine
 	if err := json.Unmarshal(line, &row); err != nil {
-		return fmt.Errorf("unmarshal line: %w", err)
+		return parsedLine{}, fmt.Errorf("unmarshal line: %w", err)
 	}
 
 	buildID, err := uuid.Parse(row.BuildID)
 	if err != nil {
-		return fmt.Errorf("parse build_id %q: %w", row.BuildID, err)
+		return parsedLine{}, fmt.Errorf("parse build_id %q: %w", row.BuildID, err)
 	}
 
 	seen := make(map[uuid.UUID]struct{})
 	var ancestorIDs []uuid.UUID
 	for _, artifact := range row.Artifacts {
 		if !artifact.HeaderFound {
-			return fmt.Errorf("build %s: artifact %q header not read: %s", buildID, artifact.Artifact, artifact.HeaderError)
+			return parsedLine{}, fmt.Errorf("build %s: artifact %q header not read: %s", buildID, artifact.Artifact, artifact.HeaderError)
 		}
 		for _, s := range artifact.AncestorBuilds {
 			id, err := uuid.Parse(s)
 			if err != nil {
-				return fmt.Errorf("parse ancestor_id %q: %w", s, err)
+				return parsedLine{}, fmt.Errorf("parse ancestor_id %q: %w", s, err)
 			}
 			if _, ok := seen[id]; ok {
 				continue
@@ -231,31 +258,47 @@ func backfillLineTx(ctx context.Context, tx pgx.Tx, line []byte) error {
 		}
 	}
 	if len(ancestorIDs) == 0 {
-		return fmt.Errorf("build %s: no ancestor_builds in any artifact", buildID)
+		return parsedLine{}, fmt.Errorf("build %s: no ancestor_builds in any artifact", buildID)
 	}
 
-	envID, err := lookupEnvIDTx(ctx, tx, buildID)
-	if err != nil {
-		return fmt.Errorf("lookup env_id for build %s: %w", buildID, err)
-	}
-
-	return tosrefcount.ApplyUploadEventTx(ctx, tx, buildID, ancestorIDs, envID, "backfill_scan")
+	return parsedLine{buildID: buildID, ancestorIDs: ancestorIDs}, nil
 }
 
-// lookupEnvIDTx reads env_builds.env_id for buildID within tx, returning "" (not an error) when the build has no env_builds row — the normal case for intermediate ancestor builds in a dependency chain.
-func lookupEnvIDTx(ctx context.Context, tx pgx.Tx, buildID uuid.UUID) (string, error) {
-	var envID *string
-	err := tx.QueryRow(ctx, `SELECT env_id FROM env_builds WHERE id = $1`, buildID).Scan(&envID)
-	switch {
-	case errors.Is(err, pgx.ErrNoRows): //nolint:forbidigo // this cmd is its own module and doesn't depend on packages/db
-		return "", nil
-	case err != nil:
-		return "", err
-	case envID == nil:
-		return "", nil
-	default:
-		return *envID, nil
+// lookupEnvIDsTx reads env_builds.env_id for every build in lines within tx in one round trip, returning a map
+// keyed by build_id. A build absent from the returned map (or mapped to "") has no env_builds row — the normal
+// case for intermediate ancestor builds in a dependency chain — and callers should treat that as env_id "".
+func lookupEnvIDsTx(ctx context.Context, tx pgx.Tx, lines []parsedLine) (map[uuid.UUID]string, error) {
+	result := make(map[uuid.UUID]string, len(lines))
+	if len(lines) == 0 {
+		return result, nil
 	}
+
+	buildIDs := make([]uuid.UUID, len(lines))
+	for i, p := range lines {
+		buildIDs[i] = p.buildID
+	}
+
+	rows, err := tx.Query(ctx, `SELECT id, env_id FROM env_builds WHERE id = ANY($1)`, buildIDs)
+	if err != nil {
+		return nil, fmt.Errorf("query env_builds: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id uuid.UUID
+		var envID *string
+		if err := rows.Scan(&id, &envID); err != nil {
+			return nil, fmt.Errorf("scan env_builds row: %w", err)
+		}
+		if envID != nil {
+			result[id] = *envID
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate env_builds rows: %w", err)
+	}
+
+	return result, nil
 }
 
 func mustConnectPostgres(ctx context.Context) *pgxpool.Pool {
