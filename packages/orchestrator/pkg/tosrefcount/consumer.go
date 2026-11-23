@@ -160,37 +160,49 @@ func (c *Consumer) ApplyUploadEvent(ctx context.Context, buildID uuid.UUID, envI
 // ApplyUploadEventTx is ApplyUploadEvent's core logic running against a caller-supplied transaction, letting a bulk
 // caller batch many events into one commit instead of paying a round trip per event. The caller owns tx's
 // lifecycle (Begin/Commit/Rollback); this never commits or rolls back.
+//
+// Issues exactly two statements regardless of len(ancestorIDs) — one unnest()-driven bulk insert into
+// tos_build_edges, one bulk upsert into tos_ancestor_reference_count for only the ancestors whose edge was newly
+// inserted — instead of two round trips per ancestor. That matters when tx's round-trip latency dominates (e.g.
+// cmd/tos-ref-count-consumer's backfill talking to a database across a high-latency link): a build with a long
+// ancestor chain previously cost 2N round trips here, now costs 2 regardless of N.
 func ApplyUploadEventTx(ctx context.Context, tx pgx.Tx, buildID uuid.UUID, ancestorIDs []uuid.UUID, envID string, source string) error {
 	if !slices.Contains(ancestorIDs, buildID) {
 		ancestorIDs = append(ancestorIDs, buildID)
 	}
 
-	for _, ancestorID := range ancestorIDs {
-		var inserted bool
-		err := tx.QueryRow(ctx, `
-			INSERT INTO tos_build_edges (build_id, ancestor_id, env_id, source)
-			VALUES ($1, $2, $3, $4)
-			ON CONFLICT (build_id, ancestor_id) DO NOTHING
-			RETURNING true
-		`, buildID, ancestorID, envID, source).Scan(&inserted)
+	// DISTINCT guards against duplicate entries in ancestorIDs (not guaranteed deduplicated by every caller):
+	// without it, two rows targeting the same (build_id, ancestor_id) within this single INSERT would violate the
+	// primary key outright — ON CONFLICT only arbitrates conflicts against rows already committed by prior
+	// statements, not duplicates within the same statement's input.
+	rows, err := tx.Query(ctx, `
+		INSERT INTO tos_build_edges (build_id, ancestor_id, env_id, source)
+		SELECT $1, a, $3, $4
+		FROM (SELECT DISTINCT a FROM unnest($2::uuid[]) AS a) AS deduped
+		ON CONFLICT (build_id, ancestor_id) DO NOTHING
+		RETURNING ancestor_id
+	`, buildID, ancestorIDs, envID, source)
+	if err != nil {
+		return fmt.Errorf("insert edges for build %s: %w", buildID, err)
+	}
 
-		switch {
-		case errors.Is(err, pgx.ErrNoRows): //nolint:forbidigo // tosrefcount is its own module and doesn't depend on packages/db
-			// Edge already existed from a prior delivery — do not bump ref_count again.
-			continue
-		case err != nil:
-			return fmt.Errorf("insert edge %s -> %s: %w", buildID, ancestorID, err)
-		}
+	newAncestorIDs, err := pgx.CollectRows(rows, pgx.RowTo[uuid.UUID])
+	if err != nil {
+		return fmt.Errorf("collect newly inserted edges for build %s: %w", buildID, err)
+	}
+	if len(newAncestorIDs) == 0 {
+		// Every edge already existed from a prior delivery — do not bump ref_count again.
+		return nil
+	}
 
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO tos_ancestor_reference_count (ancestor_id, ref_count)
-			VALUES ($1, 1)
-			ON CONFLICT (ancestor_id) DO UPDATE
-			SET ref_count = tos_ancestor_reference_count.ref_count + 1,
-			    updated_at = now()
-		`, ancestorID); err != nil {
-			return fmt.Errorf("bump ref_count for %s: %w", ancestorID, err)
-		}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO tos_ancestor_reference_count (ancestor_id, ref_count)
+		SELECT a, 1 FROM unnest($1::uuid[]) AS a
+		ON CONFLICT (ancestor_id) DO UPDATE
+		SET ref_count = tos_ancestor_reference_count.ref_count + 1,
+		    updated_at = now()
+	`, newAncestorIDs); err != nil {
+		return fmt.Errorf("bump ref_count for build %s ancestors: %w", buildID, err)
 	}
 
 	return nil
