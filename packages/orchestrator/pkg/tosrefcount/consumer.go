@@ -129,6 +129,10 @@ func (c *Consumer) HandleEvent(ctx context.Context, payload string) error {
 // The self-reference is added here rather than relying on ancestorIDs containing buildID, since a valid empty diff (e.g. a filesystem-only snapshot with no dirty blocks) fully inherits its parent's mapping and never lists its own ID — without an explicit self-reference, such a build would sit at ref_count=0 and look reclaimable despite being live.
 //
 // source distinguishes the two write paths ("live_upload" vs "backfill_scan") without needing a second table.
+//
+// Opens and commits its own transaction — one round trip per call. Bulk callers (e.g. cmd/tos-ref-count-consumer's
+// backfill, applying millions of historical rows) should use ApplyUploadEventTx instead to share one transaction
+// across many events and avoid paying a commit's latency per row.
 func (c *Consumer) ApplyUploadEvent(ctx context.Context, buildID uuid.UUID, envID string, fileType string, ancestorIDs []uuid.UUID, source string) error {
 	tx, err := c.pool.Begin(ctx)
 	if err != nil {
@@ -136,6 +140,27 @@ func (c *Consumer) ApplyUploadEvent(ctx context.Context, buildID uuid.UUID, envI
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // rollback is a no-op after Commit
 
+	if err := ApplyUploadEventTx(ctx, tx, buildID, ancestorIDs, envID, source); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit tx: %w", err)
+	}
+
+	logger.L().Info(ctx, "tos-ref-count: edges processed",
+		zap.String("build_id", buildID.String()),
+		zap.String("file_type", fileType),
+		zap.Int("ancestors", len(ancestorIDs)),
+	)
+
+	return nil
+}
+
+// ApplyUploadEventTx is ApplyUploadEvent's core logic running against a caller-supplied transaction, letting a bulk
+// caller batch many events into one commit instead of paying a round trip per event. The caller owns tx's
+// lifecycle (Begin/Commit/Rollback); this never commits or rolls back.
+func ApplyUploadEventTx(ctx context.Context, tx pgx.Tx, buildID uuid.UUID, ancestorIDs []uuid.UUID, envID string, source string) error {
 	if !slices.Contains(ancestorIDs, buildID) {
 		ancestorIDs = append(ancestorIDs, buildID)
 	}
@@ -167,16 +192,6 @@ func (c *Consumer) ApplyUploadEvent(ctx context.Context, buildID uuid.UUID, envI
 			return fmt.Errorf("bump ref_count for %s: %w", ancestorID, err)
 		}
 	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit tx: %w", err)
-	}
-
-	logger.L().Info(ctx, "tos-ref-count: edges processed",
-		zap.String("build_id", buildID.String()),
-		zap.String("file_type", fileType),
-		zap.Int("ancestors", len(ancestorIDs)),
-	)
 
 	return nil
 }

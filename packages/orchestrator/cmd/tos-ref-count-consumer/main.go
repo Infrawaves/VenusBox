@@ -104,6 +104,12 @@ func runConsume(ctx context.Context) {
 	}
 }
 
+// backfillBatchSize bounds how many input lines share one transaction. ApplyUploadEventTx issues 2-3 round trips
+// per ancestor, so one-event-per-transaction (as a naive per-line Begin/Commit would do) spends most of its wall
+// time on commit latency rather than the inserts themselves; batching amortizes that cost across many lines while
+// keeping each transaction (and the row-level locks it holds) bounded in size and retry cost.
+const backfillBatchSize = 500
+
 func runBackfill(ctx context.Context, args []string) {
 	fs := flag.NewFlagSet("backfill", flag.ExitOnError)
 	inputFlag := fs.String("input", "", "path to tos-layer-scan JSON Lines output")
@@ -123,9 +129,8 @@ func runBackfill(ctx context.Context, args []string) {
 	pool := mustConnectPostgres(ctx)
 	defer pool.Close()
 
-	consumer := tosrefcount.New(pool, nil) // backfill is always full-scope, never filtered by team
-
 	var processed, failed int
+	var batch [][]byte
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(nil, 1<<20)
 	for scanner.Scan() {
@@ -134,7 +139,39 @@ func runBackfill(ctx context.Context, args []string) {
 			log.Fatal("interrupted")
 		}
 
-		if err := backfillLine(ctx, pool, consumer, scanner.Bytes()); err != nil {
+		batch = append(batch, append([]byte(nil), scanner.Bytes()...))
+		if len(batch) >= backfillBatchSize {
+			p, fl := runBackfillBatch(ctx, pool, batch)
+			processed += p
+			failed += fl
+			batch = batch[:0]
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		//nolint:gocritic // process exits immediately after; skipping the deferred closes is harmless
+		log.Fatalf("read input: %s", err)
+	}
+	if len(batch) > 0 {
+		p, fl := runBackfillBatch(ctx, pool, batch)
+		processed += p
+		failed += fl
+	}
+
+	log.Printf("backfill complete: %d build(s) processed, %d failed", processed, failed)
+}
+
+// runBackfillBatch applies every line in batch within a single transaction, logging and skipping (not aborting the
+// batch for) any line that fails to parse or whose header wasn't read — matching backfillLine's prior per-line
+// semantics, just sharing one commit across the whole batch instead of paying one per line.
+func runBackfillBatch(ctx context.Context, pool *pgxpool.Pool, batch [][]byte) (processed, failed int) {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		log.Fatalf("begin batch tx: %s", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // rollback is a no-op after Commit
+
+	for _, line := range batch {
+		if err := backfillLineTx(ctx, tx, line); err != nil {
 			log.Printf("backfill line failed, skipping: %s", err)
 			failed++
 
@@ -142,12 +179,12 @@ func runBackfill(ctx context.Context, args []string) {
 		}
 		processed++
 	}
-	if err := scanner.Err(); err != nil {
-		//nolint:gocritic // process exits immediately after; skipping the deferred closes is harmless
-		log.Fatalf("read input: %s", err)
+
+	if err := tx.Commit(ctx); err != nil {
+		log.Fatalf("commit backfill batch: %s", err)
 	}
 
-	log.Printf("backfill complete: %d build(s) processed, %d failed", processed, failed)
+	return processed, failed
 }
 
 // scanLine mirrors cmd/tos-layer-scan's buildResult/artifactResult output shape, kept as an independent copy since the two tools talk over a file format, not a Go import.
@@ -161,10 +198,10 @@ type scanLine struct {
 	} `json:"artifacts"`
 }
 
-// backfillLine applies one tos-layer-scan JSON Lines row: unions ancestor_builds across the build's artifacts, looks up its owning env_id from env_builds, and writes the edges.
+// backfillLineTx applies one tos-layer-scan JSON Lines row within tx: unions ancestor_builds across the build's artifacts, looks up its owning env_id from env_builds, and writes the edges.
 //
 // Every artifact's header must have been read successfully. A missing/unreadable header (HeaderFound=false) is treated as a failure for the whole line, not a partial success — tos-layer-scan reports every build's memfile and rootfs header as present (see inspectArtifact), so a false HeaderFound here means the ancestors unique to that artifact were never counted, and silently continuing would make the edge set (and any future reclamation decision based on it) wrong rather than merely incomplete.
-func backfillLine(ctx context.Context, pool *pgxpool.Pool, consumer *tosrefcount.Consumer, line []byte) error {
+func backfillLineTx(ctx context.Context, tx pgx.Tx, line []byte) error {
 	var row scanLine
 	if err := json.Unmarshal(line, &row); err != nil {
 		return fmt.Errorf("unmarshal line: %w", err)
@@ -197,18 +234,18 @@ func backfillLine(ctx context.Context, pool *pgxpool.Pool, consumer *tosrefcount
 		return fmt.Errorf("build %s: no ancestor_builds in any artifact", buildID)
 	}
 
-	envID, err := lookupEnvID(ctx, pool, buildID)
+	envID, err := lookupEnvIDTx(ctx, tx, buildID)
 	if err != nil {
 		return fmt.Errorf("lookup env_id for build %s: %w", buildID, err)
 	}
 
-	return consumer.ApplyUploadEvent(ctx, buildID, envID, "backfill", ancestorIDs, "backfill_scan")
+	return tosrefcount.ApplyUploadEventTx(ctx, tx, buildID, ancestorIDs, envID, "backfill_scan")
 }
 
-// lookupEnvID reads env_builds.env_id for buildID, returning "" (not an error) when the build has no env_builds row — the normal case for intermediate ancestor builds in a dependency chain.
-func lookupEnvID(ctx context.Context, pool *pgxpool.Pool, buildID uuid.UUID) (string, error) {
+// lookupEnvIDTx reads env_builds.env_id for buildID within tx, returning "" (not an error) when the build has no env_builds row — the normal case for intermediate ancestor builds in a dependency chain.
+func lookupEnvIDTx(ctx context.Context, tx pgx.Tx, buildID uuid.UUID) (string, error) {
 	var envID *string
-	err := pool.QueryRow(ctx, `SELECT env_id FROM env_builds WHERE id = $1`, buildID).Scan(&envID)
+	err := tx.QueryRow(ctx, `SELECT env_id FROM env_builds WHERE id = $1`, buildID).Scan(&envID)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows): //nolint:forbidigo // this cmd is its own module and doesn't depend on packages/db
 		return "", nil
