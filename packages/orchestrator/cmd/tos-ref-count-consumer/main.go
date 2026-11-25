@@ -19,6 +19,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -31,6 +32,7 @@ import (
 	"github.com/bsm/redislock"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
@@ -167,11 +169,46 @@ type parsedLine struct {
 	ancestorIDs []uuid.UUID
 }
 
-// runBackfillBatch applies every line in batch within a single transaction, logging and skipping (not aborting the
-// batch for) any line that fails to parse or whose header wasn't read — matching backfillLine's prior per-line
-// semantics, just sharing one commit and one bulk env_id lookup across the whole batch instead of paying a round
-// trip per line for each.
+// maxBatchRetries bounds retries of a whole batch transaction after a deadlock. Backfill runs concurrently with
+// the live `consume` process on the same tables (tos_build_edges, tos_ancestor_reference_count), so PostgreSQL
+// occasionally picks this transaction as the deadlock victim (SQLSTATE 40P01) purely due to lock-acquisition
+// ordering, not any data problem — retrying the same batch is the correct, officially recommended response, not a
+// workaround. A persistent deadlock after this many attempts points at something else and should fail loudly
+// rather than retry forever.
+const maxBatchRetries = 5
+
+// runBackfillBatch retries applyBatchOnce up to maxBatchRetries times when the whole batch transaction is aborted
+// by a deadlock. Without this, a mid-batch deadlock (see applyBatchOnce) silently discarded every remaining line in
+// that batch — not just the one PostgreSQL blamed — while being logged identically to an ordinary per-line
+// failure (e.g. a build missing from TOS), making the data loss invisible until counted against the database
+// directly.
 func runBackfillBatch(ctx context.Context, pool *pgxpool.Pool, batch [][]byte) (processed, failed int) {
+	for attempt := 1; ; attempt++ {
+		processed, failed, err := applyBatchOnce(ctx, pool, batch)
+		if err == nil {
+			return processed, failed
+		}
+
+		if !isRetryableTxError(err) || attempt >= maxBatchRetries {
+			log.Fatalf("backfill batch failed after %d attempt(s): %s", attempt, err)
+		}
+
+		backoff := time.Duration(attempt) * 500 * time.Millisecond
+		log.Printf("backfill batch hit a retryable error (attempt %d/%d), retrying whole batch after %s: %s", attempt, maxBatchRetries, backoff, err)
+		time.Sleep(backoff)
+	}
+}
+
+// applyBatchOnce applies every line in batch within a single transaction, logging and skipping (not aborting the
+// batch for) any line that fails to parse or whose header wasn't read, and shares one commit and one bulk env_id
+// lookup across the whole batch instead of paying a round trip per line for each.
+//
+// Returns a non-nil error only for a retryable whole-transaction failure (see isRetryableTxError) — e.g. a
+// deadlock partway through the loop aborts the transaction for every subsequent statement
+// ("current transaction is aborted, commands ignored until end of transaction block", SQLSTATE 25P02), which would
+// otherwise masquerade as a wave of ordinary per-line failures and get the whole batch silently dropped on Commit.
+// The caller (runBackfillBatch) must discard processed/failed and retry the whole batch from scratch on error.
+func applyBatchOnce(ctx context.Context, pool *pgxpool.Pool, batch [][]byte) (processed, failed int, retryErr error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		log.Fatalf("begin batch tx: %s", err)
@@ -192,11 +229,19 @@ func runBackfillBatch(ctx context.Context, pool *pgxpool.Pool, batch [][]byte) (
 
 	envIDs, err := lookupEnvIDsTx(ctx, tx, parsed)
 	if err != nil {
+		if isRetryableTxError(err) {
+			return 0, 0, err
+		}
+
 		log.Fatalf("bulk env_id lookup: %s", err)
 	}
 
 	for _, p := range parsed {
 		if err := tosrefcount.ApplyUploadEventTx(ctx, tx, p.buildID, p.ancestorIDs, envIDs[p.buildID], "backfill_scan"); err != nil {
+			if isRetryableTxError(err) {
+				return 0, 0, err
+			}
+
 			log.Printf("backfill line failed, skipping: %s", err)
 			failed++
 
@@ -206,10 +251,31 @@ func runBackfillBatch(ctx context.Context, pool *pgxpool.Pool, batch [][]byte) (
 	}
 
 	if err := tx.Commit(ctx); err != nil {
+		if isRetryableTxError(err) {
+			return 0, 0, err
+		}
+
 		log.Fatalf("commit backfill batch: %s", err)
 	}
 
-	return processed, failed
+	return processed, failed, nil
+}
+
+// isRetryableTxError reports whether err is a deadlock (40P01) or the "transaction is aborted" fallout a deadlock
+// leaves on every later statement in the same transaction (25P02) — both mean the whole transaction must be retried
+// from a fresh Begin, since the connection no longer accepts any statement until that happens.
+func isRetryableTxError(err error) bool {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return false
+	}
+
+	switch pgErr.Code {
+	case "40P01", "25P02": // deadlock_detected, in_failed_sql_transaction
+		return true
+	default:
+		return false
+	}
 }
 
 // scanLine mirrors cmd/tos-layer-scan's buildResult/artifactResult output shape, kept as an independent copy since the two tools talk over a file format, not a Go import.
