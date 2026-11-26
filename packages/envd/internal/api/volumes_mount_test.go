@@ -572,6 +572,7 @@ func TestPostVolumesMountHungLookupOfAnUnsettledPathIsA500(t *testing.T) {
 	assert.True(t, a.initLock.TryAcquire(1), "the lock is not held by the hung lookup")
 }
 
+//nolint:paralleltest // checks the package-global pathProbeSlots; must run serially
 func TestBoundedProbe(t *testing.T) {
 	value, err := boundedProbe(time.Second, func() (int, error) { return 7, nil })
 	require.NoError(t, err)
@@ -589,12 +590,13 @@ func TestBoundedProbe(t *testing.T) {
 
 		return 0, nil
 	})
-	assert.ErrorIs(t, err, errPathProbeTimeout)
+	require.ErrorIs(t, err, errPathProbeTimeout)
 	close(release)
 	closed = true
 	require.Eventually(t, func() bool { return len(pathProbeSlots) == 0 }, time.Second, time.Millisecond)
 }
 
+//nolint:paralleltest // fills the package-global pathProbeSlots; must run serially
 func TestBoundedProbeCapsWorkersLeftInBlockedSyscalls(t *testing.T) {
 	release := make(chan struct{})
 	closed := false
@@ -608,7 +610,7 @@ func TestBoundedProbeCapsWorkersLeftInBlockedSyscalls(t *testing.T) {
 	const calls = maxConcurrentPathProbes + 4
 	start := make(chan struct{})
 	results := make(chan error, calls)
-	for i := 0; i < calls; i++ {
+	for range calls {
 		go func() {
 			<-start
 			_, err := boundedProbe(50*time.Millisecond, func() (int, error) {
@@ -621,7 +623,7 @@ func TestBoundedProbeCapsWorkersLeftInBlockedSyscalls(t *testing.T) {
 		}()
 	}
 	close(start)
-	for i := 0; i < calls; i++ {
+	for range calls {
 		require.ErrorIs(t, <-results, errPathProbeTimeout)
 	}
 	assert.Equal(t, int32(maxConcurrentPathProbes), started.Load())
