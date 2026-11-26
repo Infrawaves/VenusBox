@@ -20,6 +20,7 @@
 // Usage:
 //
 //	tos-ancestor-mover -dest-bucket dev-hk-tpl-mv [-dry-run]
+//	tos-ancestor-mover -dest-bucket dev-hk-tpl-mv -ancestor-id <uuid>   # move only this one build, for a trial run
 package main
 
 import (
@@ -38,6 +39,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -57,10 +59,11 @@ type moveResult struct {
 func main() {
 	destBucket := flag.String("dest-bucket", "", "destination bucket to move ref_count=0 build objects into")
 	dryRun := flag.Bool("dry-run", false, "list what would be moved without copying or deleting anything")
+	onlyAncestorID := flag.String("ancestor-id", "", "if set, move only this one ancestor_id instead of every ref_count=0 row (for a trial run before moving everything)")
 	flag.Parse()
 
 	if *destBucket == "" {
-		fmt.Fprintln(os.Stderr, "usage: tos-ancestor-mover -dest-bucket <bucket> [-dry-run]")
+		fmt.Fprintln(os.Stderr, "usage: tos-ancestor-mover -dest-bucket <bucket> [-dry-run] [-ancestor-id <uuid>]")
 		os.Exit(1)
 	}
 
@@ -89,11 +92,32 @@ func main() {
 		log.Fatalf("initialize S3 client: %s", err)
 	}
 
-	ancestorIDs, err := loadZeroRefCountAncestors(ctx, pool)
-	if err != nil {
-		log.Fatalf("query ref_count=0 ancestors: %s", err)
+	var ancestorIDs []uuid.UUID
+	if *onlyAncestorID != "" {
+		id, err := uuid.Parse(*onlyAncestorID)
+		if err != nil {
+			log.Fatalf("invalid -ancestor-id %q: %s", *onlyAncestorID, err)
+		}
+
+		// Only ever move what the reference-count table actually says is unreferenced — an -ancestor-id
+		// typo or a stale value from an earlier query must not be able to move a still-referenced build's
+		// data purely because it was typed on the command line.
+		isZero, err := isRefCountZero(ctx, pool, id)
+		if err != nil {
+			log.Fatalf("check ref_count for %s: %s", id, err)
+		}
+		if !isZero {
+			log.Fatalf("refusing to move %s: ref_count is not 0 (or the row doesn't exist)", id)
+		}
+
+		ancestorIDs = []uuid.UUID{id}
+	} else {
+		ancestorIDs, err = loadZeroRefCountAncestors(ctx, pool)
+		if err != nil {
+			log.Fatalf("query ref_count=0 ancestors: %s", err)
+		}
 	}
-	log.Printf("tos-ancestor-mover: %d ancestor(s) with ref_count=0, source=%s dest=%s dry_run=%v", len(ancestorIDs), sourceBucket, *destBucket, *dryRun)
+	log.Printf("tos-ancestor-mover: %d ancestor(s) to process, source=%s dest=%s dry_run=%v", len(ancestorIDs), sourceBucket, *destBucket, *dryRun)
 
 	enc := json.NewEncoder(os.Stdout)
 	var moved, skipped, failed int
@@ -133,6 +157,20 @@ func newS3Client(ctx context.Context) (*s3.Client, error) {
 		}
 		o.UsePathStyle = usePathStyle
 	}), nil
+}
+
+func isRefCountZero(ctx context.Context, pool *pgxpool.Pool, ancestorID uuid.UUID) (bool, error) {
+	var refCount int
+	err := pool.QueryRow(ctx, `SELECT ref_count FROM tos_ancestor_reference_count WHERE ancestor_id = $1`, ancestorID).Scan(&refCount)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) { //nolint:forbidigo // this cmd is its own module and doesn't depend on packages/db
+			return false, nil
+		}
+
+		return false, err
+	}
+
+	return refCount == 0, nil
 }
 
 func loadZeroRefCountAncestors(ctx context.Context, pool *pgxpool.Pool) ([]uuid.UUID, error) {
