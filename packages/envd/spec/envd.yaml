@@ -135,6 +135,83 @@ paths:
                 type: integer
                 minimum: 0
 
+  /volumes/mount:
+    post:
+      summary: Mount NFS volumes into a running sandbox, in addition to the ones /init mounted
+      description: >-
+        Mounts each listed volume the way /init does, parents before children. A path
+        already mounted for the request's lifecycle is skipped, so a retried call is safe.
+        All or nothing: when a volume cannot be mounted, the ones this call mounted are
+        unmounted again (a 400; a 500 when one could not be) and the response names the
+        failed path on X-Envd-Failed-Volume.
+        A path that is itself a symlink is refused, and a volume whose mount would hide a
+        mounted one, as through a symlinked parent, fails too.
+        Unlike /init, a failure is not remembered: it does not fail a later /init or
+        call. The volumes are then mounted again by every /init that lists them.
+      x-internal: true
+      security:
+        - AccessTokenAuth: []
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                lifecycleID:
+                  type: string
+                  description: Lifecycle ID of the sandbox, the one /init was called with
+                volumeMounts:
+                  type: array
+                  minItems: 1
+                  items:
+                    $ref: "#/components/schemas/VolumeMount"
+                unsettledPaths:
+                  type: array
+                  items:
+                    type: string
+                  description: >-
+                    Paths of volumeMounts an earlier call may have left in any state, as one
+                    whose response was lost. The response covers each: after a 204 it is
+                    mounted, after a 400 it is not. One the mount ledger has for this
+                    lifecycle is kept as it is and rolled back with the rest on a failure;
+                    any other is mounted afresh, after detaching a mount found there that no
+                    recorded volume owns. A request with unsettled paths that is refused, or
+                    whose unsettled path cannot be settled, answers 500, as does a body envd
+                    cannot decode.
+                    Each must be the path of one of volumeMounts.
+              required:
+                - volumeMounts
+      responses:
+        "204":
+          description: Every listed volume is mounted
+        "400":
+          description: >-
+            The request is invalid or a volume could not be mounted. X-Envd-Failed-Volume
+            names the volume path that failed, when one did.
+          headers:
+            X-Envd-Failed-Volume:
+              description: The volume path that could not be mounted
+              schema:
+                type: string
+        "401":
+          description: The access token is missing or wrong
+        "500":
+          description: >-
+            A volume could not be mounted and the rollback could not detach every volume this
+            call mounted. Those stay mounted and listed for the lifecycle, so a later /init
+            of a new lifecycle that does not list them detaches them. X-Envd-Failed-Volume
+            names the volume path that failed.
+          headers:
+            X-Envd-Failed-Volume:
+              description: The volume path that could not be mounted
+              schema:
+                type: string
+        "503":
+          description: The /init lock could not be acquired before the request ended
+
   /freeze:
     post:
       summary: Freeze user/pty cgroups before pause and wait for them to stop. Written directly by envd to avoid Process.Start / shell overhead under load.

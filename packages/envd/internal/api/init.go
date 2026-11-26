@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"maps"
 	"net/http"
 	"net/netip"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -477,6 +479,13 @@ func (a *API) SetData(ctx context.Context, logger zerolog.Logger, data PostInitJ
 		}
 	}
 
+	// Before setupNFS mounts anything: a stale mount holds the server's NFS
+	// client, which a new mount would reuse. The orchestrator leaves volumeMounts
+	// out when the list is empty, so this runs without it too.
+	if err := a.unmountUnlistedNFS(logger, data.LifecycleID, data.VolumeMounts); err != nil {
+		return fmt.Errorf("failed to detach stale NFS volumes: %w", err)
+	}
+
 	if data.VolumeMounts != nil {
 		if err := a.setupNFS(ctx, logger, data.LifecycleID, *data.VolumeMounts); err != nil {
 			return fmt.Errorf("failed to setup NFS volumes: %w", err)
@@ -821,21 +830,16 @@ func (a *API) setupNFS(ctx context.Context, logger zerolog.Logger, lifecycleID *
 	// server, and while an old mount still holds it, a new mount reuses its connection,
 	// which is dead after a resume.
 	for _, volume := range pending {
-		a.mountedPaths.Delete(volume.Path)
 		if err := a.nfs.Unmount(volume.Path); err != nil {
 			return a.failNFS(requestLifecycleID, volume, fmt.Errorf("unmount: %w", err))
 		}
+		a.mountedPaths.Delete(volume.Path)
 	}
 
-	// Order by where each path really leads: a parent reached through a symlink must
-	// still be mounted before the paths beneath it.
-	depths := make(map[string]int, len(pending))
-	for _, volume := range pending {
-		depths[volume.Path] = pathDepth(resolveExisting(volume.Path))
+	pending, unresolved, err := a.sortByResolvedDepth(pending)
+	if err != nil {
+		return a.failNFS(requestLifecycleID, unresolved, err)
 	}
-	pending = slices.SortedStableFunc(slices.Values(pending), func(x, y VolumeMount) int {
-		return depths[x.Path] - depths[y.Path]
-	})
 
 	mountIDs := make(map[string]uint64, len(pending))
 	for _, volume := range pending {
@@ -863,6 +867,68 @@ func (a *API) setupNFS(ctx context.Context, logger zerolog.Logger, lifecycleID *
 	return nil
 }
 
+// unmountUnlistedNFS detaches the mounts of an earlier lifecycle that this
+// /init does not list. A resume lists every volume the sandbox keeps, so such a
+// mount is one its snapshot was taken with but its record was not, as when a
+// pause raced /volumes/mount. Left in place it is a hard NFS mount the NFS proxy
+// no longer serves, and every access to it hangs. Only an /init that names its
+// lifecycle can tell a mount is stale. A mount that cannot be detached fails the
+// /init, as a sandbox left with it would hang where the mount is; it stays in
+// the ledger, so a retried /init tries again.
+func (a *API) unmountUnlistedNFS(logger zerolog.Logger, lifecycleID *string, listed *[]VolumeMount) error {
+	requestLifecycleID := derefString(lifecycleID)
+	if requestLifecycleID == "" {
+		return nil
+	}
+
+	keep := make(map[string]struct{})
+	if listed != nil {
+		for _, volume := range *listed {
+			keep[volume.Path] = struct{}{}
+		}
+	}
+
+	var stale []string
+	a.mountedPaths.Range(func(k, v any) bool {
+		path, _ := k.(string)
+		mountedLifecycle := asString(v)
+		_, listed := keep[path]
+		if mountedLifecycle == "" || (!listed && mountedLifecycle != requestLifecycleID) {
+			stale = append(stale, path)
+		}
+
+		return true
+	})
+	// Children before parents, so detaching a parent leaves no child behind it.
+	slices.SortFunc(stale, func(x, y string) int { return pathDepth(y) - pathDepth(x) })
+	var failed error
+	for _, path := range stale {
+		if err := a.nfs.Unmount(path); err != nil {
+			logger.Warn().Err(err).Str("path", path).Msg("Failed to detach an unlisted NFS volume of an earlier lifecycle")
+			if failed == nil {
+				failed = &nfsVolumeError{path: path, err: fmt.Errorf("detach a stale mount: %w", err)}
+			}
+
+			continue
+		}
+		a.mountedPaths.Delete(path)
+		logger.Info().Str("path", path).Msg("Detached an unlisted NFS volume of an earlier lifecycle")
+	}
+
+	return failed
+}
+
+// unsettledMountError reports a failed mount that may still have left a mount
+// at the path. before is the mount ID the path resolved to before the attempt.
+type unsettledMountError struct {
+	before uint64
+	err    error
+}
+
+func (e *unsettledMountError) Error() string { return e.err.Error() }
+
+func (e *unsettledMountError) Unwrap() error { return e.err }
+
 // nfsVolumeError names the volume path that could not be mounted.
 type nfsVolumeError struct {
 	path string
@@ -881,6 +947,59 @@ func (a *API) failNFS(lifecycleID string, volume VolumeMount, err error) error {
 	}
 
 	return err
+}
+
+// sortByResolvedDepth orders volumes by where each path really leads: a parent
+// reached through a symlink must still be mounted before the paths beneath it.
+// On an error it also returns the volume whose path could not be resolved.
+func (a *API) sortByResolvedDepth(volumes []VolumeMount) ([]VolumeMount, VolumeMount, error) {
+	depths := make(map[string]int, len(volumes))
+	for _, volume := range volumes {
+		resolved, err := a.resolveExistingBounded(volume.Path)
+		if err != nil {
+			return nil, volume, fmt.Errorf("resolve the path: %w", err)
+		}
+		depths[volume.Path] = pathDepth(resolved)
+	}
+
+	return slices.SortedStableFunc(slices.Values(volumes), func(x, y VolumeMount) int {
+		return depths[x.Path] - depths[y.Path]
+	}), VolumeMount{}, nil
+}
+
+func (a *API) probeTimeout() time.Duration {
+	if a.pathProbeTimeout > 0 {
+		return a.pathProbeTimeout
+	}
+
+	return pathProbeTimeout
+}
+
+// lstatBounded is os.Lstat, given up on after the probe timeout.
+func (a *API) lstatBounded(path string) (fs.FileInfo, error) {
+	lstat := a.lstat
+	if lstat == nil {
+		lstat = os.Lstat
+	}
+
+	return boundedProbe(a.probeTimeout(), func() (fs.FileInfo, error) { return lstat(path) })
+}
+
+// isSymlink reports whether the last component of path is a symlink. Its only
+// error is a lookup that did not finish; a path that cannot be read is no
+// symlink.
+func (a *API) isSymlink(path string) (bool, error) {
+	info, err := a.lstatBounded(path)
+	if errors.Is(err, errPathProbeTimeout) {
+		return false, err
+	}
+
+	return err == nil && info.Mode()&os.ModeSymlink != 0, nil
+}
+
+// resolveExistingBounded is resolveExisting, given up on after the probe timeout.
+func (a *API) resolveExistingBounded(path string) (string, error) {
+	return boundedProbe(a.probeTimeout(), func() (string, error) { return resolveExisting(path), nil })
 }
 
 // resolveExisting resolves symlinks in the longest existing prefix of path.
@@ -921,11 +1040,12 @@ func (a *API) mountNFS(ctx context.Context, logger zerolog.Logger, volume Volume
 
 	start := time.Now()
 	attempts, timeouts := 0, 0
+	var timedOut bool
 	for {
 		attempts++
 		mountCtx, cancel := context.WithTimeout(volumeCtx, nfsMountTimeout)
 		err = a.nfs.Mount(mountCtx, volume.NfsTarget, volume.Path)
-		timedOut := mountCtx.Err() != nil || errors.Is(err, context.DeadlineExceeded)
+		timedOut = mountCtx.Err() != nil || errors.Is(err, context.DeadlineExceeded)
 		cancel()
 		if err == nil {
 			break
@@ -946,7 +1066,8 @@ func (a *API) mountNFS(ctx context.Context, logger zerolog.Logger, volume Volume
 				break
 			}
 			if err := a.nfs.Unmount(volume.Path); err != nil {
-				return 0, fmt.Errorf("unmount after a timed-out mount: %w", err)
+				// The timed-out mount may have taken effect and is still there.
+				return 0, &unsettledMountError{before: before, err: fmt.Errorf("unmount after a timed-out mount: %w", err)}
 			}
 
 			continue
@@ -960,14 +1081,21 @@ func (a *API) mountNFS(ctx context.Context, logger zerolog.Logger, volume Volume
 		time.Sleep(a.nfsMountRetryDelay)
 	}
 	if err != nil {
-		return 0, fmt.Errorf("after %d attempts: %w", attempts, err)
+		err = fmt.Errorf("after %d attempts: %w", attempts, err)
+		if timedOut {
+			// A mount that timed out may still have taken effect.
+			return 0, &unsettledMountError{before: before, err: err}
+		}
+
+		return 0, err
 	}
 
 	// The mount ID identifies the mount the path resolves to, so this also holds for
 	// a path behind a symlink or inside another volume.
 	after, err := a.nfs.MountID(volume.Path)
 	if err != nil {
-		return 0, err
+		// The mount succeeded, so it is likely in place.
+		return 0, &unsettledMountError{before: before, err: err}
 	}
 	if after == before {
 		return 0, errors.New("mount reported success, but the path is not on a new mount")

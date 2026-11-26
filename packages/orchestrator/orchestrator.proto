@@ -305,6 +305,17 @@ message SandboxListResponse {
   repeated RunningSandbox sandboxes = 1;
 }
 
+// SandboxAppendVolumeMountsRequest mounts volumes into a running sandbox, next
+// to the ones it was created with. A separate RPC rather than a field on
+// SandboxUpdateRequest, so an orchestrator predating it answers Unimplemented
+// instead of ignoring the field and reporting success.
+message SandboxAppendVolumeMountsRequest {
+  string sandbox_id = 1;
+  // Only the new mounts. Each path must not equal, contain or lie inside the
+  // path of a mount the sandbox already has.
+  repeated SandboxVolumeMount volume_mounts = 2;
+}
+
 service SandboxService {
   rpc Create(SandboxCreateRequest) returns (SandboxCreateResponse);
   rpc Update(SandboxUpdateRequest) returns (google.protobuf.Empty);
@@ -312,4 +323,5 @@ service SandboxService {
   rpc Delete(SandboxDeleteRequest) returns (google.protobuf.Empty);
   rpc Pause(SandboxPauseRequest) returns (SandboxPauseResponse);
   rpc Checkpoint(SandboxCheckpointRequest) returns (SandboxCheckpointResponse);
+  rpc AppendVolumeMounts(SandboxAppendVolumeMountsRequest) returns (google.protobuf.Empty);
 }

@@ -385,6 +385,16 @@ type PostInitJSONBody struct {
 // PostInitJSONBodyThaw defines parameters for PostInit.
 type PostInitJSONBodyThaw string
 
+// PostVolumesMountJSONBody defines parameters for PostVolumesMount.
+type PostVolumesMountJSONBody struct {
+	// LifecycleID Lifecycle ID of the sandbox, the one /init was called with
+	LifecycleID string `json:"lifecycleID,omitempty"`
+
+	// UnsettledPaths Paths of volumeMounts an earlier call may have left in any state, as one whose response was lost. The response covers each: after a 204 it is mounted, after a 400 it is not. One the mount ledger has for this lifecycle is kept as it is and rolled back with the rest on a failure; any other is mounted afresh, after detaching a mount found there that no recorded volume owns. A request with unsettled paths that is refused, or whose unsettled path cannot be settled, answers 500, as does a body envd cannot decode. Each must be the path of one of volumeMounts.
+	UnsettledPaths []string      `json:"unsettledPaths,omitempty"`
+	VolumeMounts   []VolumeMount `json:"volumeMounts"`
+}
+
 // PostFilesMultipartRequestBody defines body for PostFiles for multipart/form-data ContentType.
 type PostFilesMultipartRequestBody PostFilesMultipartBody
 
@@ -393,3 +403,6 @@ type PostFilesComposeJSONRequestBody = ComposeRequest
 
 // PostInitJSONRequestBody defines body for PostInit for application/json ContentType.
 type PostInitJSONRequestBody PostInitJSONBody
+
+// PostVolumesMountJSONRequestBody defines body for PostVolumesMount for application/json ContentType.
+type PostVolumesMountJSONRequestBody PostVolumesMountJSONBody

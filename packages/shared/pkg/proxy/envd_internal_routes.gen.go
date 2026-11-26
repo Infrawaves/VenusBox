@@ -12,4 +12,5 @@ var specInternalPaths = []string{
 	"/fsthaw",
 	"/init",
 	"/unfreeze",
+	"/volumes/mount",
 }

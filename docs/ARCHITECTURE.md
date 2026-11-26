@@ -292,7 +292,8 @@ under `pkg/`, almost all Linux-only.
 
 gRPC services on :5008 (`pkg/server/`, `pkg/service/`, `pkg/template/server/`, `pkg/volumes/`):
 
-- **SandboxService** — `Create`, `Update`, `List`, `Delete`, `Pause`, `Checkpoint`.
+- **SandboxService** — `Create`, `Update`, `List`, `Delete`, `Pause`, `Checkpoint`,
+  `AppendVolumeMounts` (see "Volume mounts in a running sandbox"; it runs as an `Update` callback).
   `Update` callbacks are serialized per sandbox. A successful transition out of the live
   map closes update admission and joins any admitted callback before stop/checkpoint
   work or stopping notifications begin; `Close` repeats that check for crash cleanup.
@@ -405,8 +406,8 @@ The agent inside every VM (started by systemd very early in boot), port 49983, c
 - **Filesystem service** (`spec/filesystem/filesystem.proto`): stat/list/make/move/remove/watch.
 - **REST**: `/health`, `/metrics`, `/envs`, `/files` upload/download, `/init` (orchestrator pushes
   env vars, access token, metadata and the online CPU count after boot/resume), `/upgrade` (live self-upgrade, below),
-  freeze/thaw hooks used during pause.
-- **Public vs. control-plane routes**: the control routes (`/init`, `/collapse`, `/upgrade`, and the
+  `/volumes/mount` (NFS volumes added to a running sandbox), freeze/thaw hooks used during pause.
+- **Public vs. control-plane routes**: the control routes (`/init`, `/collapse`, `/upgrade`, `/volumes/mount`, and the
   freeze/thaw hooks) are marked `x-internal: true` in `spec/envd.yaml`, and `/upgrade` — which the spec does not
   describe — is listed alongside them in the orchestrator's `pkg/sandbox/envd`. The orchestrator
   reaches them over the host network at the sandbox slot IP; the sandbox proxy refuses them with a
@@ -999,6 +1000,65 @@ sequenceDiagram
   Settings synchronize on the next volume creation; zero leaves an existing cloud quota in place.
   All nodes serving the volumes must maintain consistent storage configuration. Deployment must
   quiesce old volume/quota writers around migration and upgrade nodes before enabling the new API.
+
+### Volume mounts in a running sandbox
+
+A sandbox gets its volumes at create (`volumeMounts`), and `POST /sandboxes/{sandboxID}/volume-mounts`
+adds at most 2 per request while it runs. Mounts cannot be removed or replaced. Inside the guest,
+each volume is an NFS mount of `<orchestrator in-sandbox IP>:/<volume name>`, served by the node's
+NFS proxy (`pkg/nfsproxy`), which refuses a volume the sandbox's config does not list.
+
+1. The API checks the request the way a create does (feature flag, team volumes by name, paths),
+   plus that the sandbox is running. It skips create's envd version check: the version it records
+   is the template's, which a live or offline envd upgrade leaves behind.
+2. It calls the node's `AppendVolumeMounts`. The node refuses a path that equals, contains or lies
+   inside another mount of the sandbox, and a volume whose name the sandbox already mounts as a
+   different volume: the guest mounts by name, and a deleted volume's name can be taken again at
+   once. It adds the mounts to the sandbox config, which authorizes them at the NFS proxy, and calls
+   envd's `/volumes/mount`, bounded by 10 s plus 25 s per volume; the limit of 2 keeps that within
+   the API's 70 s request deadline. The call runs as an `Update` callback, so a pause, kill or
+   timeout update waits for it, and holds the checkpoint marker, so an in-place checkpoint is
+   refused meanwhile. The API's caller going away does not end the call.
+3. When envd answers that it failed and left nothing mounted (a 400), the node removes the mounts
+   from the config and releases the NFS proxy's directory descriptors and handle caches for
+   volumes no remaining path references. A directory with I/O still in flight refuses new
+   operations immediately and closes after those operations finish. A mount request rechecks
+   the config and network lifecycle before publishing an opened directory, with handle registration ordered before
+   release. envd bounds path probes and caps workers left in uncancellable NFS lookups; an
+   inconclusive mount-ownership check refuses the retry without detaching a possibly shared mount.
+   On any other answer, or none, the guest may hold them, so they stay listed and
+   served, the node marks their paths unsettled in the config and answers `Unavailable`. No `/init`
+   asks envd to mount an unsettled path, so a checkpoint's `/init` cannot fail on one that never
+   worked, and one of a new lifecycle detaches a mount envd recorded there; an unrecorded one stays
+   served, since the copied config still lists the path. The API returns 503 asking for the same
+   request again. The retry
+   sends the unsettled paths to envd, whose answer then covers them: after a 400 the node drops
+   them from the config too, and a success settles them. envd keeps one its ledger has for the
+   lifecycle (the ledger records only verified mounts), rolling it back with the rest on a failure,
+   and mounts any other afresh, first detaching a mount found there only if no recorded volume owns
+   it: through a symlinked parent the path can resolve to another volume's mount. It settles them before anything else can fail, and
+   answers 500 when it refuses such a request or cannot detach one.
+4. envd mounts them as `/init` does, all or nothing. It refuses a path that is itself a symlink,
+   since detaching it would detach whatever it leads to, fails a mount that would hide a mounted
+   volume, as a path under a symlinked parent can, and rolls back when the node's request ends
+   before it answers. A mount it cannot detach stays in the mount ledger with an empty lifecycle ID,
+   so a retry or a new lifecycle's `/init` tries to detach it again; the empty ID survives the mount
+   handover of an envd live upgrade. Unlike `/init`, a failure is not remembered for the lifecycle,
+   so a bad path does not fail a later `/init`.
+5. Only after the node succeeds does the API add the mounts to the sandbox record, and only if the
+   record still belongs to the same execution. A pause writes that record's mounts into the
+   snapshot, so a resume's `/init` mounts them again. If the sandbox is killed in between, the
+   request answers 404. If an in-place checkpoint holds the record, it answers 409 and asks for the
+   same request once the sandbox runs again: the checkpoint keeps the execution and the mounts, so
+   the retry records them. If a pause takes it, or the execution changed, it answers 409 and the
+   snapshot does not keep the new mounts. The guest's memory still holds them, so every `/init` of
+   a new lifecycle detaches the mounts of an earlier one it does not list, and fails when one
+   cannot be detached; left in place, a hard NFS mount the proxy no longer serves hangs every
+   access. Writing the record first would instead risk a snapshot listing a mount that then failed,
+   which would fail every resume.
+
+A retry of a mount already in place succeeds at every step. An orchestrator predating the RPC answers
+`Unimplemented` (HTTP 503), and an envd without `/volumes/mount` answers 404 (HTTP 400).
 
 ### Pause and resume
 

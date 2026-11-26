@@ -364,24 +364,10 @@ func (a *APIStore) createSandbox(c *gin.Context, body api.NewSandbox, defaultTim
 	}
 
 	sbxVolumeMounts, err := convertAPIVolumesToOrchestratorVolumes(
-		ctx, a.sqlcDB, a.featureFlags, teamInfo.ID, apiVolumeMounts, build,
+		ctx, a.sqlcDB, a.featureFlags, teamInfo.ID, apiVolumeMounts, new(sharedUtils.DerefOrDefault(build.EnvdVersion, "")),
 	)
 	if err != nil {
-		if errors.Is(err, errVolumesNotSupported) || errors.Is(err, errNoEnvdVersion) {
-			return nil, &api.APIError{Code: http.StatusBadRequest, ClientMsg: err.Error(), Retryable: apierrors.NoRetry}
-		}
-
-		if errors.Is(err, ErrVolumeMountsDisabled) {
-			return nil, &api.APIError{Code: http.StatusBadRequest, ClientMsg: "Volume mounts are not enabled.", Retryable: apierrors.NoRetry}
-		}
-
-		if vne, ok := errors.AsType[InvalidVolumeMountsError](err); ok {
-			return nil, &api.APIError{Code: http.StatusBadRequest, ClientMsg: vne.Error(), Retryable: apierrors.NoRetry}
-		}
-
-		telemetry.ReportError(ctx, "failed to convert volume mounts", err, telemetry.WithSandboxID(sandboxID))
-
-		return nil, &api.APIError{Code: http.StatusInternalServerError, ClientMsg: "failed to convert volume mounts", Retryable: apierrors.CanRetry}
+		return nil, volumeMountsAPIError(ctx, err, sandboxID)
 	}
 
 	getSandboxData := func(_ context.Context) (apiorch.SandboxMetadata, *api.APIError) {
@@ -594,7 +580,30 @@ func checkEnvdVersionRequirement(buildVersion, requiredMinVersion string, featur
 	return nil
 }
 
-func convertAPIVolumesToOrchestratorVolumes(ctx context.Context, sqlClient *sqlcdb.Client, featureFlags featureFlagsClient, teamID uuid.UUID, volumeMounts []api.SandboxVolumeMount, env *queries.EnvBuild) ([]*orchestrator.SandboxVolumeMount, error) {
+// volumeMountsAPIError turns an error of convertAPIVolumesToOrchestratorVolumes
+// into the response for the request.
+func volumeMountsAPIError(ctx context.Context, err error, sandboxID string) *api.APIError {
+	if errors.Is(err, errVolumesNotSupported) || errors.Is(err, errNoEnvdVersion) {
+		return &api.APIError{Code: http.StatusBadRequest, ClientMsg: err.Error(), Retryable: apierrors.NoRetry}
+	}
+
+	if errors.Is(err, ErrVolumeMountsDisabled) {
+		return &api.APIError{Code: http.StatusBadRequest, ClientMsg: "Volume mounts are not enabled.", Retryable: apierrors.NoRetry}
+	}
+
+	if vne, ok := errors.AsType[InvalidVolumeMountsError](err); ok {
+		return &api.APIError{Code: http.StatusBadRequest, ClientMsg: vne.Error(), Retryable: apierrors.NoRetry}
+	}
+
+	telemetry.ReportError(ctx, "failed to convert volume mounts", err, telemetry.WithSandboxID(sandboxID))
+
+	return &api.APIError{Code: http.StatusInternalServerError, ClientMsg: "failed to convert volume mounts", Retryable: apierrors.CanRetry}
+}
+
+// convertAPIVolumesToOrchestratorVolumes checks the mounts and resolves their
+// volumes. A nil envdVersion skips the envd version check, for a caller whose
+// recorded version may predate the envd the sandbox runs.
+func convertAPIVolumesToOrchestratorVolumes(ctx context.Context, sqlClient *sqlcdb.Client, featureFlags featureFlagsClient, teamID uuid.UUID, volumeMounts []api.SandboxVolumeMount, envdVersion *string) ([]*orchestrator.SandboxVolumeMount, error) {
 	// are any volumes configured?
 	if len(volumeMounts) == 0 {
 		return []*orchestrator.SandboxVolumeMount{}, nil // only b/c you should never return (nil, nil)
@@ -606,9 +615,10 @@ func convertAPIVolumesToOrchestratorVolumes(ctx context.Context, sqlClient *sqlc
 	}
 
 	// does your envd version support volumes?
-	envdVersion := sharedUtils.DerefOrDefault(env.EnvdVersion, "")
-	if err := checkEnvdVersionRequirement(envdVersion, minEnvdVersionForVolumes, errVolumesNotSupported); err != nil {
-		return nil, err
+	if envdVersion != nil {
+		if err := checkEnvdVersionRequirement(*envdVersion, minEnvdVersionForVolumes, errVolumesNotSupported); err != nil {
+			return nil, err
+		}
 	}
 
 	// get volumes from the database

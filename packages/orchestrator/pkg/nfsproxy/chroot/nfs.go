@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"regexp"
+	"slices"
 	"sync"
 	"syscall"
 
@@ -95,7 +96,8 @@ func NewNFSHandler(
 }
 
 // OnMount registers f to be called with each filesystem Mount creates for a
-// sandbox, before Mount returns it.
+// sandbox, before Mount returns it. The callback runs under the cache lock and
+// must not call back into this handler.
 func (h *NFSHandler) OnMount(f func(billy.Filesystem)) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -103,8 +105,8 @@ func (h *NFSHandler) OnMount(f func(billy.Filesystem)) {
 	h.onMount = append(h.onMount, f)
 }
 
-// OnRelease registers f to be called with each filesystem Mount returned for
-// a sandbox once the sandbox releases its network, before it is closed.
+// OnRelease registers f to be called before a filesystem is closed, when its
+// volume is rolled back or its sandbox releases its network.
 func (h *NFSHandler) OnRelease(f func(billy.Filesystem)) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -126,24 +128,60 @@ func (h *NFSHandler) OnNetworkRelease(ctx context.Context, sbx *sandbox.Sandbox)
 	onRelease := h.onRelease
 	h.mu.Unlock()
 
+	h.releaseMounts(context.WithoutCancel(ctx), sbx, mounts, onRelease)
+
+	return nil
+}
+
+// OnVolumeMountsRemoved releases volumes no longer authorized after a confirmed
+// rollback. Other paths can still mount the same volume, including paths whose
+// outcome is unknown, so retain every ID still present in the config.
+func (h *NFSHandler) OnVolumeMountsRemoved(ctx context.Context, sbx *sandbox.Sandbox) {
+	h.mu.Lock()
+	keep := make(map[uuid.UUID]struct{})
+	for _, mount := range sbx.Config.GetVolumeMounts() {
+		keep[mount.ID] = struct{}{}
+	}
+	removed := make(map[uuid.UUID]*wrappedFS)
+	mounts := h.chrootsByLifecycleID[sbx.LifecycleID]
+	for id, mounted := range mounts {
+		if _, retained := keep[id]; !retained {
+			delete(mounts, id)
+			removed[id] = mounted
+		}
+	}
+	if len(mounts) == 0 {
+		delete(h.chrootsByLifecycleID, sbx.LifecycleID)
+	}
+	onRelease := h.onRelease
+	h.mu.Unlock()
+
+	// Retire handles and close idle roots before the update returns. A root with
+	// in-flight I/O closes once it drains, without extending the append deadline.
+	closeCtx, cancel := context.WithCancel(ctx)
+	cancel()
+	h.releaseMounts(closeCtx, sbx, removed, onRelease)
+}
+
+func (h *NFSHandler) releaseMounts(ctx context.Context, sbx *sandbox.Sandbox, mounts map[uuid.UUID]*wrappedFS, onRelease []func(billy.Filesystem)) {
 	for _, mounted := range mounts {
 		for _, f := range onRelease {
 			f(mounted)
 		}
 
 		chroot := mounted.chroot
-		err := chroot.Close()
-		if err != nil {
+		err := chroot.CloseContext(ctx)
+		if err != nil && !errors.Is(err, context.Canceled) {
 			logger.L().Warn(ctx, "failed to close chroot",
-				logger.WithSandboxID(sbx.Runtime.SandboxID),					logger.WithTeamID(sbx.Runtime.TeamID),				logger.WithLifecycleID(lifecycleID),
+				logger.WithSandboxID(sbx.Runtime.SandboxID),
+				logger.WithTeamID(sbx.Runtime.TeamID),
+				logger.WithLifecycleID(sbx.LifecycleID),
 				zap.String("path", chroot.Root()),
 				zap.Error(err),
 			)
 		}
 		h.chrootUnmountsCounter.Add(ctx, 1)
 	}
-
-	return nil
 }
 
 func (h *NFSHandler) Mount(
@@ -185,7 +223,7 @@ func (h *NFSHandler) getChroot(ctx context.Context, remoteAddr net.Addr, request
 
 	// find the local volume mount
 	var volumeMount *sandbox.VolumeMountConfig
-	for _, sbxVolumeMount := range sbx.Config.VolumeMounts {
+	for _, sbxVolumeMount := range sbx.Config.GetVolumeMounts() {
 		if sbxVolumeMount.Name == volumeName {
 			volumeMount = &sbxVolumeMount
 
@@ -223,32 +261,47 @@ func (h *NFSHandler) getChroot(ctx context.Context, remoteAddr net.Addr, request
 		return nil, fmt.Errorf("failed to mount %q: %w", volumeName, err)
 	}
 
-	h.mu.Lock()
-	mounts, ok := h.chrootsByLifecycleID[lifecycleID]
-	if !ok {
-		mounts = make(map[uuid.UUID]*wrappedFS)
-		h.chrootsByLifecycleID[lifecycleID] = mounts
-	}
-	fs, raced := mounts[volumeMount.ID]
-	if !raced {
-		fs = wrapChrooted(chroot)
-		mounts[volumeMount.ID] = fs
-	}
-	onMount := h.onMount
-	h.mu.Unlock()
-
-	if raced {
-		if err := chroot.Close(); err != nil {
-			logger.L().Warn(ctx, "failed to close duplicate chroot", zap.String("path", chroot.Root()), zap.Error(err))
+	fs, err := h.cacheChroot(ctx, remoteAddr, sbx, *volumeMount, chroot)
+	if err != nil || fs.chroot != chroot {
+		if closeErr := chroot.CloseContext(ctx); closeErr != nil {
+			logger.L().Warn(ctx, "failed to close unused chroot", zap.String("path", chroot.Root()), zap.Error(closeErr))
 		}
+	}
 
+	return fs, err
+}
+
+// cacheChroot rechecks authorization after opening the root, which can outlive a
+// rollback or network release. Publication and handle registration share the
+// lock used by removal, so cleanup cannot be followed by a late registration.
+// The caller closes opened unless the returned filesystem uses it.
+func (h *NFSHandler) cacheChroot(ctx context.Context, remoteAddr net.Addr, sbx *sandbox.Sandbox, volumeMount sandbox.VolumeMountConfig, opened *chrooted.Chrooted) (*wrappedFS, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	current, err := h.sandboxes.GetByHostPort(remoteAddr.String())
+	if err != nil || current != sbx {
+		return nil, ErrUnknownSandbox
+	}
+	if !slices.ContainsFunc(sbx.Config.GetVolumeMounts(), func(m sandbox.VolumeMountConfig) bool {
+		return m.Name == volumeMount.Name && m.ID == volumeMount.ID && m.Type == volumeMount.Type
+	}) {
+		return nil, ErrVolumeNotFound
+	}
+
+	mounts := h.chrootsByLifecycleID[sbx.LifecycleID]
+	if fs, ok := mounts[volumeMount.ID]; ok {
 		return fs, nil
 	}
-
-	for _, f := range onMount {
+	if mounts == nil {
+		mounts = make(map[uuid.UUID]*wrappedFS)
+		h.chrootsByLifecycleID[sbx.LifecycleID] = mounts
+	}
+	fs := wrapChrooted(opened)
+	mounts[volumeMount.ID] = fs
+	for _, f := range h.onMount {
 		f(fs)
 	}
-
 	h.chrootMountsCounter.Add(ctx, 1)
 
 	return fs, nil

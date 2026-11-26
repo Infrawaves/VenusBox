@@ -36,6 +36,12 @@ type MapSubscriber interface {
 	OnNetworkRelease(ctx context.Context, sbx *Sandbox) error
 }
 
+// VolumeMountsSubscriber optionally receives confirmed volume rollbacks. The
+// callback runs after the config changes, while the sandbox update is held.
+type VolumeMountsSubscriber interface {
+	OnVolumeMountsRemoved(ctx context.Context, sbx *Sandbox)
+}
+
 // Map tracks live sandboxes, outstanding lifecycle cleanup, and network assignments.
 //
 //   - live: keyed by sandboxID, holds the current routable lifecycle per
@@ -93,6 +99,14 @@ func (m *Map) trigger(ctx context.Context, fn func(context.Context, MapSubscribe
 	for _, subscriber := range m.subs {
 		fn(ctx, subscriber)
 	}
+}
+
+func (m *Map) volumeMountsRemoved(ctx context.Context, sbx *Sandbox) {
+	m.trigger(ctx, func(ctx context.Context, subscriber MapSubscriber) {
+		if subscriber, ok := subscriber.(VolumeMountsSubscriber); ok {
+			subscriber.OnVolumeMountsRemoved(ctx, sbx)
+		}
+	})
 }
 
 func (m *Map) Items() map[string]*Sandbox {

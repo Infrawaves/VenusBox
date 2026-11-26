@@ -3,6 +3,8 @@
 package chrooted
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -391,6 +393,64 @@ func TestClose(t *testing.T) {
 	require.ErrorIs(t, err, ErrClosed)
 
 	_, err = fs.EvalSymlinks("/")
+	require.ErrorIs(t, err, ErrClosed)
+}
+
+func TestCloseContextCancellationStillReleasesAfterOperationsFinish(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	fs, err := Chroot(dir)
+	require.NoError(t, err)
+	release, err := fs.acquire()
+	require.NoError(t, err)
+	release = sync.OnceFunc(release)
+	defer release()
+
+	cause := errors.New("rollback stopped waiting")
+	ctx, cancel := context.WithCancelCause(t.Context())
+	cancel(cause)
+	done := make(chan error, 1)
+	go func() {
+		done <- fs.CloseContext(ctx)
+	}()
+
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, cause)
+	case <-time.After(time.Second):
+		t.Fatal("CloseContext did not stop waiting after cancellation")
+	}
+
+	_, err = fs.Stat("/")
+	require.ErrorIs(t, err, ErrClosed, "cancellation must leave the tree closed to new operations")
+	fdPath := fmt.Sprintf("/proc/self/fd/%d", fs.rootFD)
+	target, err := os.Readlink(fdPath)
+	require.NoError(t, err)
+	require.Equal(t, dir, target, "the in-flight operation still owns the root descriptor")
+
+	release()
+	require.Eventually(t, func() bool {
+		target, _ := os.Readlink(fdPath)
+
+		return target != dir
+	}, time.Second, time.Millisecond, "the descriptor must be released after the in-flight operation finishes")
+	require.ErrorIs(t, fs.Close(), ErrClosed)
+}
+
+func TestCloseContextReleasesIdleRootWithCanceledContext(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	fs, err := Chroot(dir)
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	require.NoError(t, fs.CloseContext(ctx))
+	target, _ := os.Readlink(fmt.Sprintf("/proc/self/fd/%d", fs.rootFD))
+	require.NotEqual(t, dir, target, "an idle root closes before CloseContext returns")
+	_, err = fs.Stat("/")
 	require.ErrorIs(t, err, ErrClosed)
 }
 
