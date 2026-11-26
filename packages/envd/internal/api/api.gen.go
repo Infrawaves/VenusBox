@@ -390,6 +390,16 @@ type PostInitJSONBody struct {
 // PostInitJSONBodyThaw defines parameters for PostInit.
 type PostInitJSONBodyThaw string
 
+// PostVolumesMountJSONBody defines parameters for PostVolumesMount.
+type PostVolumesMountJSONBody struct {
+	// LifecycleID Lifecycle ID of the sandbox, the one /init was called with
+	LifecycleID *string `json:"lifecycleID,omitempty"`
+
+	// UnsettledPaths Paths of volumeMounts an earlier call may have left in any state, as one whose response was lost. The response covers each: after a 204 it is mounted, after a 400 it is not. One the mount ledger has for this lifecycle is kept as it is and rolled back with the rest on a failure; any other is mounted afresh, after detaching a mount found there that no recorded volume owns. A request with unsettled paths that is refused, or whose unsettled path cannot be settled, answers 500, as does a body envd cannot decode. Each must be the path of one of volumeMounts.
+	UnsettledPaths *[]string     `json:"unsettledPaths,omitempty"`
+	VolumeMounts   []VolumeMount `json:"volumeMounts"`
+}
+
 // PostFilesMultipartRequestBody defines body for PostFiles for multipart/form-data ContentType.
 type PostFilesMultipartRequestBody PostFilesMultipartBody
 
@@ -398,6 +408,9 @@ type PostFilesComposeJSONRequestBody = ComposeRequest
 
 // PostInitJSONRequestBody defines body for PostInit for application/json ContentType.
 type PostInitJSONRequestBody PostInitJSONBody
+
+// PostVolumesMountJSONRequestBody defines body for PostVolumesMount for application/json ContentType.
+type PostVolumesMountJSONRequestBody PostVolumesMountJSONBody
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -437,6 +450,9 @@ type ServerInterface interface {
 	// PostUnfreeze Unfreeze user/pty cgroups. Intended for the orchestrator's pause-failure rollback path and the thaw after an in-place checkpoint; the normal resume thaw happens inside /init, not here.
 	// (POST /unfreeze)
 	PostUnfreeze(w http.ResponseWriter, r *http.Request)
+	// PostVolumesMount Mount NFS volumes into a running sandbox, in addition to the ones /init mounted
+	// (POST /volumes/mount)
+	PostVolumesMount(w http.ResponseWriter, r *http.Request)
 }
 
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
@@ -512,6 +528,12 @@ func (_ Unimplemented) GetMetrics(w http.ResponseWriter, r *http.Request) {
 // PostUnfreeze Unfreeze user/pty cgroups. Intended for the orchestrator's pause-failure rollback path and the thaw after an in-place checkpoint; the normal resume thaw happens inside /init, not here.
 // (POST /unfreeze)
 func (_ Unimplemented) PostUnfreeze(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// PostVolumesMount Mount NFS volumes into a running sandbox, in addition to the ones /init mounted
+// (POST /volumes/mount)
+func (_ Unimplemented) PostVolumesMount(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -853,6 +875,20 @@ func (siw *ServerInterfaceWrapper) PostUnfreeze(w http.ResponseWriter, r *http.R
 	handler.ServeHTTP(w, r)
 }
 
+// PostVolumesMount operation middleware
+func (siw *ServerInterfaceWrapper) PostVolumesMount(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PostVolumesMount(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 type UnescapedCookieParamError struct {
 	ParamName string
 	Err       error
@@ -974,6 +1010,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/init", wrapper.PostInit)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/volumes/mount", wrapper.PostVolumesMount)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/freeze", wrapper.PostFreeze)

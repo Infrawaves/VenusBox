@@ -19,13 +19,14 @@ func TestMountLedger_HandoverRoundTrip(t *testing.T) {
 	a.ImportMounts([]*upgrade.MountEntry{
 		{Path: "/mnt/a", LifecycleId: "lc-1"},
 		{Path: "/mnt/b", LifecycleId: "lc-2"},
+		{Path: "/mnt/unsettled", LifecycleId: ""},
 	})
 
 	got := map[string]string{}
 	for _, m := range a.ExportMounts() {
 		got[m.GetPath()] = m.GetLifecycleId()
 	}
-	assert.Equal(t, map[string]string{"/mnt/a": "lc-1", "/mnt/b": "lc-2"}, got)
+	assert.Equal(t, map[string]string{"/mnt/a": "lc-1", "/mnt/b": "lc-2", "/mnt/unsettled": ""}, got)
 }
 
 // TestImportedMountLedger_SkipsRemountForSameLifecycle is the point of carrying

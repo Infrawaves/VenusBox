@@ -665,7 +665,7 @@ func TestOrchestrator_convertVolumeMounts(t *testing.T) {
 
 			actual, err := convertAPIVolumesToOrchestratorVolumes(
 				t.Context(), db.SqlcClient, ffClient,
-				teamID, tc.input, &queries.EnvBuild{EnvdVersion: new(minEnvdVersionForVolumes)},
+				teamID, tc.input, new(minEnvdVersionForVolumes),
 			)
 			assert.Equal(t, tc.err, err)
 			assert.Equal(t, tc.expected, actual)
@@ -696,7 +696,7 @@ func TestOrchestrator_convertVolumeMounts(t *testing.T) {
 			t.Context(), db.SqlcClient, ffClient,
 			teamID, []api.SandboxVolumeMount{
 				{Name: "vol1", Path: "/vol1"},
-			}, &queries.EnvBuild{EnvdVersion: new(minEnvdVersionForVolumes)},
+			}, new(minEnvdVersionForVolumes),
 		)
 		require.NoError(t, err)
 		assert.Equal(t, []*orchestrator.SandboxVolumeMount{
@@ -1724,4 +1724,32 @@ func withEgress(allowPublicAccess bool, allowOut []string) *dbtypes.SandboxNetwo
 	network.Egress = &dbtypes.SandboxNetworkEgressConfig{AllowedAddresses: allowOut}
 
 	return network
+}
+
+func TestConvertVolumeMountsEnvdVersionCheck(t *testing.T) {
+	t.Parallel()
+
+	db := testutils.SetupDatabase(t)
+	teamID := testutils.CreateTestTeam(t, db)
+	_, err := db.SqlcClient.CreateVolume(t.Context(), queries.CreateVolumeParams{
+		ID: uuid.New(), Name: "vol1", TeamID: teamID, VolumeType: "local",
+	})
+	require.NoError(t, err)
+
+	mounts := []api.SandboxVolumeMount{{Name: "vol1", Path: "/vol1"}}
+	newFlags := func(t *testing.T) *handlersmocks.MockFeatureFlagsClient {
+		t.Helper()
+
+		ffClient := handlersmocks.NewMockFeatureFlagsClient(t)
+		ffClient.EXPECT().BoolFlag(mock.Anything, mock.Anything).Return(true)
+
+		return ffClient
+	}
+
+	_, err = convertAPIVolumesToOrchestratorVolumes(t.Context(), db.SqlcClient, newFlags(t), teamID, mounts, new("0.1.0"))
+	require.ErrorIs(t, err, errVolumesNotSupported, "create checks the template's envd")
+
+	actual, err := convertAPIVolumesToOrchestratorVolumes(t.Context(), db.SqlcClient, newFlags(t), teamID, mounts, nil)
+	require.NoError(t, err, "a nil version skips the check")
+	assert.Len(t, actual, 1)
 }

@@ -56,6 +56,13 @@ func WithFailingSandboxList() TestOptions {
 	}
 }
 
+// WithSandboxClient makes the node answer sandbox calls with client.
+func WithSandboxClient(client orchestrator.SandboxServiceClient) TestOptions {
+	return func(node *TestNode) {
+		node.client.Sandbox = client
+	}
+}
+
 // mockInfoClientSilent never answers, standing in for a node this replica
 // genuinely cannot reach.
 type mockInfoClientSilent struct {

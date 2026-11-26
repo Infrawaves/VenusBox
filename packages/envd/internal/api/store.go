@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"io/fs"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -74,7 +75,11 @@ type API struct {
 	nfsMountRetryFor time.Duration
 	// nfsMountRetryDelay is the pause between those retries.
 	nfsMountRetryDelay time.Duration
-	mountedPaths       sync.Map // map[path]lifecycleID - tracks which lifecycle each path was mounted for
+	// pathProbeTimeout bounds a lookup of a volume path; zero means the default.
+	pathProbeTimeout time.Duration
+	// lstat looks a volume path up; nil means os.Lstat. Tests replace it.
+	lstat        func(path string) (fs.FileInfo, error)
+	mountedPaths sync.Map // map[path]lifecycleID - tracks which lifecycle each path was mounted for
 
 	// fsFreezer freezes/thaws the guest rootfs for filesystem-only pauses;
 	// fsFreezeLock serializes /fsfreeze and /fsthaw.

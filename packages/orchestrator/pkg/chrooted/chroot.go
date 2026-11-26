@@ -15,6 +15,7 @@
 package chrooted
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -156,6 +157,14 @@ func (fs *Chrooted) acquire() (release func(), err error) {
 // ErrCloseTimeout and the descriptor is released when the last operation
 // completes.
 func (fs *Chrooted) Close() error {
+	return fs.CloseContext(context.Background())
+}
+
+// CloseContext closes the tree as Close does, but also stops waiting when ctx
+// ends. Cancellation returns the context cause; the tree stays closed to new
+// operations and its descriptor is released when the last operation finishes.
+// An idle tree releases its descriptor immediately, even if ctx has ended.
+func (fs *Chrooted) CloseContext(ctx context.Context) error {
 	if !fs.closed.CompareAndSwap(false, true) {
 		return fmt.Errorf("%w: %q has already been closed", ErrClosed, fs.ActualRoot)
 	}
@@ -183,6 +192,8 @@ func (fs *Chrooted) Close() error {
 	select {
 	case err := <-done:
 		return fs.closeResult(err)
+	case <-ctx.Done():
+		return fmt.Errorf("waiting to close root %q: %w", fs.ActualRoot, context.Cause(ctx))
 	case <-timeout.C:
 		return fmt.Errorf("%w: %q", ErrCloseTimeout, fs.ActualRoot)
 	}

@@ -946,6 +946,19 @@ components:
         - name
         - path
 
+    SandboxVolumeMountsAppend:
+      type: object
+      properties:
+        volumeMounts:
+          type: array
+          minItems: 1
+          maxItems: 2
+          description: The volume mounts to add, at most 2 per request
+          items:
+            $ref: "#/components/schemas/SandboxVolumeMount"
+      required:
+        - volumeMounts
+
     Sandbox:
       required:
         - templateID
@@ -4389,6 +4402,47 @@ paths:
           $ref: "#/components/responses/404"
         "429":
           $ref: "#/components/responses/429"
+
+  /sandboxes/{sandboxID}/volume-mounts:
+    post:
+      summary: Append volume mounts
+      description: >-
+        Mount existing team volumes into a running sandbox, next to the ones it already has.
+        List only the new mounts. A path must not equal, contain or lie inside the path of
+        another mount. Mounts cannot be removed or replaced. The mounts are kept across
+        pause and resume. A mount already in place is accepted again, so a retry is safe.
+      security:
+        - ApiKeyAuth: []
+        - AuthProviderBearerAuth: []
+          AuthProviderTeamAuth: []
+        - AdminApiKeyAuth: []
+          AdminTeamAuth: []
+        - AdminJWTAuth: []
+          AdminTeamAuth: []
+      tags: [sandboxes]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SandboxVolumeMountsAppend"
+      parameters:
+        - $ref: "#/components/parameters/sandboxID"
+      responses:
+        "204":
+          description: Every listed volume is mounted
+        "400":
+          $ref: "#/components/responses/400"
+        "401":
+          $ref: "#/components/responses/401"
+        "404":
+          $ref: "#/components/responses/404"
+        "409":
+          $ref: "#/components/responses/409"
+        "429":
+          $ref: "#/components/responses/429"
+        "500":
+          $ref: "#/components/responses/500"
 
   /sandboxes/{sandboxID}/snapshots:
     post:

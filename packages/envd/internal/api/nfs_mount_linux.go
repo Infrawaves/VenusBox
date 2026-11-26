@@ -18,14 +18,18 @@ func (execNFSMounter) Unmount(path string) error {
 }
 
 func (execNFSMounter) MountID(path string) (uint64, error) {
-	var st unix.Statx_t
-	// Asks for no attributes the NFS client would fetch from the server.
-	if err := unix.Statx(unix.AT_FDCWD, path, unix.AT_STATX_DONT_SYNC, unix.STATX_MNT_ID, &st); err != nil {
-		return 0, err
-	}
-	if st.Mask&unix.STATX_MNT_ID == 0 {
-		return 0, errors.New("the kernel does not report mount IDs")
-	}
+	// Asking for no attributes keeps the server out of the final stat, but
+	// resolving the path can still look a name up in an NFS directory, so the
+	// lookup is bounded.
+	return boundedProbe(pathProbeTimeout, func() (uint64, error) {
+		var st unix.Statx_t
+		if err := unix.Statx(unix.AT_FDCWD, path, unix.AT_STATX_DONT_SYNC, unix.STATX_MNT_ID, &st); err != nil {
+			return 0, err
+		}
+		if st.Mask&unix.STATX_MNT_ID == 0 {
+			return 0, errors.New("the kernel does not report mount IDs")
+		}
 
-	return st.Mnt_id, nil
+		return st.Mnt_id, nil
+	})
 }

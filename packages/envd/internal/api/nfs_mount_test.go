@@ -24,22 +24,32 @@ import (
 // fakeNFS records mounts. A path's mount ID changes when it is mounted, unless the
 // path is in noop, which models a mount that reports success but does nothing.
 type fakeNFS struct {
-	ids      map[string]uint64
-	next     uint64
-	mounted  []string
-	ops      []string // "unmount <path>" and "mount <path>", in call order
-	failing  map[string]error
-	noop     map[string]bool
-	timeouts map[string]int    // mounts of the path that time out before one succeeds
-	refusals map[string]int    // mounts of the path that fail at once before one succeeds
-	untimed  []string          // paths whose mount point was created without a deadline
-	covers   map[string]string // mounting the key covers the value's mount
+	ids            map[string]uint64
+	next           uint64
+	mounted        []string
+	ops            []string // "unmount <path>" and "mount <path>", in call order
+	failing        map[string]error
+	noop           map[string]bool
+	timeouts       map[string]int    // mounts of the path that time out before one succeeds
+	timeoutMounts  map[string]int    // timed-out mount attempts that take effect before timing out
+	refusals       map[string]int    // mounts of the path that fail at once before one succeeds
+	untimed        []string          // paths whose mount point was created without a deadline
+	covers         map[string]string // mounting the key covers the value's mount
+	unmountFailing map[string]error
+	// idLostOnMount: a mount of the path succeeds, then its mount ID cannot be read.
+	idLostOnMount           map[string]bool
+	idLost                  map[string]bool
+	mountIDErrors           map[string]int // MountID calls that fail before succeeding
+	mountIDErrorsAfterMount map[string]int
 }
 
 func newFakeNFS() *fakeNFS {
 	return &fakeNFS{
 		ids: map[string]uint64{}, next: 100, failing: map[string]error{}, noop: map[string]bool{},
-		timeouts: map[string]int{}, refusals: map[string]int{}, covers: map[string]string{},
+		timeouts: map[string]int{}, timeoutMounts: map[string]int{}, refusals: map[string]int{}, covers: map[string]string{},
+		unmountFailing: map[string]error{},
+		idLostOnMount:  map[string]bool{}, idLost: map[string]bool{},
+		mountIDErrors: map[string]int{}, mountIDErrorsAfterMount: map[string]int{},
 	}
 }
 
@@ -51,6 +61,13 @@ func (f *fakeNFS) Mount(_ context.Context, _, path string) error {
 	}
 	if f.timeouts[path] > 0 {
 		f.timeouts[path]--
+		if f.timeoutMounts[path] > 0 {
+			f.timeoutMounts[path]--
+			f.next++
+			f.ids[path] = f.next
+		}
+		f.mountIDErrors[path] += f.mountIDErrorsAfterMount[path]
+		f.mountIDErrorsAfterMount[path] = 0
 
 		return context.DeadlineExceeded
 	}
@@ -67,6 +84,11 @@ func (f *fakeNFS) Mount(_ context.Context, _, path string) error {
 		f.next++
 		f.ids[path] = f.next
 	}
+	if f.idLostOnMount[path] {
+		f.idLost[path] = true
+	}
+	f.mountIDErrors[path] += f.mountIDErrorsAfterMount[path]
+	f.mountIDErrorsAfterMount[path] = 0
 
 	return nil
 }
@@ -82,10 +104,21 @@ func (f *fakeNFS) MakeDir(ctx context.Context, path string) error {
 func (f *fakeNFS) Unmount(path string) error {
 	f.ops = append(f.ops, "unmount "+path)
 
-	return nil
+	return f.unmountFailing[path]
 }
 
-func (f *fakeNFS) MountID(path string) (uint64, error) { return f.ids[path], nil }
+func (f *fakeNFS) MountID(path string) (uint64, error) {
+	if f.mountIDErrors[path] > 0 {
+		f.mountIDErrors[path]--
+
+		return 0, errors.New("temporary mount ID read failure")
+	}
+	if f.idLost[path] {
+		return 0, errors.New("stale file handle")
+	}
+
+	return f.ids[path], nil
+}
 
 func newNFSTestAPI(t *testing.T) (*API, *fakeNFS, string) {
 	t.Helper()

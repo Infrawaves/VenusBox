@@ -266,7 +266,7 @@ func (s *Sandbox) newEnvdInitRequest(address string) *envdInitRequest {
 			AccessToken:    utils.DerefOrDefault(s.Config.Envd.AccessToken, ""),
 			DefaultUser:    utils.DerefOrDefault(s.Config.Envd.DefaultUser, ""),
 			DefaultWorkdir: utils.DerefOrDefault(s.Config.Envd.DefaultWorkdir, ""),
-			VolumeMounts:   s.convertMounts(s.Config.VolumeMounts),
+			VolumeMounts:   s.convertMounts(s.Config.GetSettledVolumeMounts()),
 			CaBundle:       s.CABundle,
 			// A snapshot may resume with a different number of guest CPUs online.
 			CpuCount: s.guestCpuCount(),

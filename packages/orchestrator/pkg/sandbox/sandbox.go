@@ -6,8 +6,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"path/filepath"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -153,12 +155,21 @@ type Config struct {
 	// time out and tear the sandbox down before a debugger can attach.
 	SkipEnvdWait bool
 
+	// VolumeMounts is set at construction; a running sandbox can gain mounts
+	// through AppendVolumeMounts, so read it with GetVolumeMounts once the
+	// sandbox is live.
 	VolumeMounts []VolumeMountConfig
 
 	MaxSandboxLengthHours int64
 
-	// mu protects mutable sub-fields of Network (Egress, Ingress).
-	// The Network pointer itself is set once at construction and never replaced.
+	// unsettledVolumePaths holds the paths of appended VolumeMounts whose outcome
+	// envd never reported. They stay listed, so the NFS proxy serves whatever the
+	// guest may hold, but no /init asks envd to mount them; an append settles them.
+	unsettledVolumePaths map[string]struct{}
+
+	// mu protects mutable sub-fields of Network (Egress, Ingress), VolumeMounts
+	// and unsettledVolumePaths. The Network pointer itself is set once at construction and
+	// never replaced.
 	mu      *sync.RWMutex
 	Network *orchestrator.SandboxNetworkConfig
 }
@@ -212,9 +223,87 @@ func (c *Config) Clone() *Config {
 	if clone.Network == nil {
 		clone.Network = &orchestrator.SandboxNetworkConfig{}
 	}
+	clone.VolumeMounts = slices.Clone(c.VolumeMounts)
+	clone.unsettledVolumePaths = maps.Clone(c.unsettledVolumePaths)
 	clone.mu = &sync.RWMutex{}
 
 	return &clone
+}
+
+// GetVolumeMounts returns a copy of the volume mounts in a thread-safe manner.
+func (c *Config) GetVolumeMounts() []VolumeMountConfig {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	return slices.Clone(c.VolumeMounts)
+}
+
+// GetSettledVolumeMounts returns the volume mounts an /init asks envd to mount:
+// all but the unsettled ones. Leaving those out makes an /init of a new
+// lifecycle detach whatever the guest holds there, rather than fail on a mount
+// that may never have worked.
+func (c *Config) GetSettledVolumeMounts() []VolumeMountConfig {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	return slices.DeleteFunc(slices.Clone(c.VolumeMounts), func(m VolumeMountConfig) bool {
+		_, unsettled := c.unsettledVolumePaths[m.Path]
+
+		return unsettled
+	})
+}
+
+// unsettledAmong returns the paths of mounts that are unsettled.
+func (c *Config) unsettledAmong(mounts []VolumeMountConfig) []string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	var paths []string
+	for _, m := range mounts {
+		if _, ok := c.unsettledVolumePaths[m.Path]; ok {
+			paths = append(paths, m.Path)
+		}
+	}
+
+	return paths
+}
+
+// setVolumeMountsUnsettled marks the paths unsettled, or settles them.
+func (c *Config) setVolumeMountsUnsettled(paths []string, unsettled bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if unsettled && c.unsettledVolumePaths == nil {
+		c.unsettledVolumePaths = make(map[string]struct{})
+	}
+	for _, path := range paths {
+		if unsettled {
+			c.unsettledVolumePaths[path] = struct{}{}
+		} else {
+			delete(c.unsettledVolumePaths, path)
+		}
+	}
+}
+
+// addVolumeMounts appends mounts. It replaces the slice rather than growing it
+// in place, so a copy taken before keeps its own contents.
+func (c *Config) addVolumeMounts(mounts []VolumeMountConfig) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.VolumeMounts = slices.Concat(c.VolumeMounts, mounts)
+}
+
+// removeVolumeMounts drops the mounts at the given paths.
+func (c *Config) removeVolumeMounts(paths map[string]struct{}) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.VolumeMounts = slices.DeleteFunc(slices.Clone(c.VolumeMounts), func(m VolumeMountConfig) bool {
+		_, ok := paths[m.Path]
+
+		return ok
+	})
 }
 
 type VolumeMountConfig struct {
