@@ -39,3 +39,17 @@ CREATE OR REPLACE VIEW tos_build_edges_with_env AS
 SELECT e.*, v.last_spawned_at AS env_last_spawned_at
 FROM tos_build_edges e
 LEFT JOIN envs v ON v.id = e.env_id;
+
+-- Table 3: append-only audit trail written by cmd/tos-ancestor-mover after it successfully relocates an
+-- ancestor's TOS objects out of the live template bucket. Not read by any reclamation decision — ref_count
+-- and tos_build_edges are untouched by a move, so a redelivered event is still handled correctly by their
+-- existing ON CONFLICT DO NOTHING idempotency. This table exists solely so a mistaken move can be reversed:
+-- object_keys plus dest_bucket is everything needed to CopyObject the data back to source_bucket.
+CREATE TABLE IF NOT EXISTS tos_ancestor_moves (
+    ancestor_id    uuid NOT NULL,
+    source_bucket  text NOT NULL,
+    dest_bucket    text NOT NULL,
+    object_keys    text[] NOT NULL,
+    moved_at       timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (ancestor_id, moved_at)
+);
