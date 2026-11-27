@@ -1,7 +1,9 @@
 // tos-ancestor-mover is a standalone, one-shot tool that relocates the TOS objects of builds with
 // ref_count = 0 in tos_ancestor_reference_count (see tos-reference-counting-plan.md) from the live template
 // bucket into a separate bucket, via server-side CopyObject, deleting the source objects only after every
-// object for that build has been copied successfully.
+// object for that build has been copied successfully. On success it also deletes the ancestor_id's row from
+// tos_ancestor_reference_count — recording what moved in tos_ancestor_moves first — so repeated runs at scale
+// (hundreds of thousands of templates) don't keep re-confirming "nothing left here" for every build already moved.
 //
 // It moves only each build's own object prefix ("{buildID}/..."), never its ancestors — a build's ref_count
 // measures whether anything still depends on it, not what it itself depends on, so moving only its own prefix
@@ -233,23 +235,49 @@ func moveBuild(ctx context.Context, pool *pgxpool.Pool, client *s3.Client, sourc
 	result := moveResult{AncestorID: ancestorID.String(), Status: "moved", ObjectKeys: keys}
 
 	// The move is already final at this point (source deleted, destination has every object) — a failure
-	// recording it is reported but does not change Status or retry anything, since there's nothing left
-	// to retry: re-running the tool would see ref_count still 0 and the source objects already gone,
-	// re-attempt the same copy+delete sequence, and produce another (also-unaudited) no-op.
-	if err := recordMove(ctx, pool, ancestorID, sourceBucket, destBucket, keys); err != nil {
-		result.AuditError = fmt.Sprintf("record move in tos_ancestor_moves: %s", err)
+	// here is reported but does not change Status or retry anything, since there's nothing left to retry:
+	// re-running the tool would see ref_count still 0 (the row is only removed once this succeeds) and the
+	// source objects already gone, re-attempt the same copy+delete sequence, and produce another
+	// (also-unaudited) no-op.
+	if err := recordMoveAndClearRefCount(ctx, pool, ancestorID, sourceBucket, destBucket, keys); err != nil {
+		result.AuditError = fmt.Sprintf("record move in tos_ancestor_moves / clear tos_ancestor_reference_count: %s", err)
 	}
 
 	return result
 }
 
-func recordMove(ctx context.Context, pool *pgxpool.Pool, ancestorID uuid.UUID, sourceBucket, destBucket string, keys []string) error {
-	_, err := pool.Exec(ctx, `
+// recordMoveAndClearRefCount atomically appends ancestorID's move to tos_ancestor_moves and removes its row from
+// tos_ancestor_reference_count. The row must go — at scale (hundreds of thousands of templates, millions of
+// snapshots), ref_count=0 rows that stay forever would make every future run's "WHERE ref_count = 0" scan, and the
+// one TOS listing it costs per already-moved row to confirm there's nothing left to move, grow without bound.
+// Deleting it is safe: once ancestorID's objects are gone from sourceBucket, nothing can ever reference it again
+// (ApplyUploadEventTx's self-reference bump only fires for a build whose header was just uploaded, which can't
+// happen for data that no longer exists), and tos_ancestor_moves is sufficient to recover what moved if the
+// deletion turns out to be a mistake — this tool only reads from tos_ancestor_reference_count, never tos_build_edges,
+// so removing this row has no effect on any edge's deleted_at state.
+func recordMoveAndClearRefCount(ctx context.Context, pool *pgxpool.Pool, ancestorID uuid.UUID, sourceBucket, destBucket string, keys []string) error {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // rollback is a no-op after Commit
+
+	if _, err := tx.Exec(ctx, `
 		INSERT INTO tos_ancestor_moves (ancestor_id, source_bucket, dest_bucket, object_keys)
 		VALUES ($1, $2, $3, $4)
-	`, ancestorID, sourceBucket, destBucket, keys)
+	`, ancestorID, sourceBucket, destBucket, keys); err != nil {
+		return fmt.Errorf("insert into tos_ancestor_moves: %w", err)
+	}
 
-	return err
+	if _, err := tx.Exec(ctx, `DELETE FROM tos_ancestor_reference_count WHERE ancestor_id = $1`, ancestorID); err != nil {
+		return fmt.Errorf("delete from tos_ancestor_reference_count: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit tx: %w", err)
+	}
+
+	return nil
 }
 
 func listAllKeys(ctx context.Context, client *s3.Client, bucket, prefix string) ([]string, error) {
